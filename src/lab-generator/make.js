@@ -206,6 +206,11 @@ function makeBgpConfFrr(router, lab) {
 	lab.file[router.name + "/etc/frr/frr.conf"] += "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";
 	lab.file[router.name + "/etc/frr/frr.conf"] += "router bgp " + router.routing.bgp.as + "\n\n";
 
+	if (router.routing.bgp.noEbgpRequiresPolicy)
+		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp ebgp-requires-policy\n";
+	if (router.routing.bgp.noNetworkImportCheck)
+		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp network import-check\n";
+
 	// Inserimento tutte le Network su cui annunciare BGP
 	for (let network of router.routing.bgp.network) {
 		if (network && network != "") {
@@ -226,9 +231,15 @@ function makeBgpConfFrr(router, lab) {
 		}
 	});
 
+	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/frr/frr.conf"] += router.routing.bgp.free + "\n";
+
+	//Definizione delle policy: fuori dal blocco router bgp
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(router.routing.bgp, "frr");
 }
 
 /* ------------------------------------------------------ */
@@ -369,9 +380,15 @@ function makeBgpConfQuagga(router, lab) {
 		}
 	});
 
+	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\n" + router.routing.bgp.free + "\n";
+
+	//Definizione delle policy: fuori dal blocco router bgp
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpPolicyDefinitions(router.routing.bgp, "quagga");
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\nlog file /var/log/zebra/bgpd.log\n\n"
 		+ "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";

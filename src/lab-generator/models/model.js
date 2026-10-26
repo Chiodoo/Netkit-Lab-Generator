@@ -74,12 +74,17 @@ var backbone = {
 		bgp: {
 			en: false,
 			as: "",
+			noEbgpRequiresPolicy: false,
+			noNetworkImportCheck: false,
 			network: [""],
 			remote: [{
 				neighbor: "",
 				as: "",
-				description: ""
+				description: "",
+				defaultOriginate: false,
+				apply: emptyApply()	// apply[cmd][in|out] = id of a policy
 			}],
+			policies: [],	// { id, type, name, rules: [] }, see bgp-policy.js
 			free: ""
 		},
 		frr: {

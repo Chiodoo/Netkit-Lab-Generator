@@ -138,7 +138,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope) {
 	};
 
 	$scope.addBgpNeighbor = function (machine) {
-		machine.routing.bgp.remote.push({ "neighbor": "", "as": "", "description": ""/*, "p_list":[{"name":"", "direction":""}]*/ });
+		machine.routing.bgp.remote.push(JSON.clone(backbone.routing.bgp.remote[0]));
 	};
 
 	$scope.removeBgpNeighbor = function (machine) {
@@ -211,6 +211,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope) {
 					try {
 						let app = JSON.parse(e.target.result.substring(e.target.result.indexOf("["))); // rimozione caratteri di codifica prima di '['
 						$scope.netkit = app[0].netkit;
+						$scope.netkit.forEach(migrateBgpPolicies);
 						$scope.counter = $scope.netkit.length;
 						$scope.labInfo = app[0].labInfo;
 						$scope.$apply();
