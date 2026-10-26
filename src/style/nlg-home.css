@@ -226,6 +226,11 @@ span.btn {
 	padding: 10px;
 }
 
+/* main.css gives every .ng-scope height: 100%, in table cells firefox resolves it and the cells stop growing */
+.bgp-policies .ng-scope {
+	height: auto;
+}
+
 .bgp-policies .form-inline .form-control {
 	margin: 2px 0;
 }
