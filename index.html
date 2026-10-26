@@ -529,6 +529,18 @@
 										<label>AS: </label>
 										<input type="text" placeholder="0" pattern="^[0-9]*$" class="form-control"
 											data-ng-model="machine.routing.bgp.as" required />
+										<div data-ng-show="machine.routingSoftware == 'frr'">
+											<p>
+												<input title="ebgp-requires-policy" type="checkbox"
+													data-ng-model="machine.routing.bgp.noEbgpRequiresPolicy" />
+												no bgp ebgp-requires-policy
+											</p>
+											<p>
+												<input title="network import-check" type="checkbox"
+													data-ng-model="machine.routing.bgp.noNetworkImportCheck" />
+												no bgp network import-check
+											</p>
+										</div>
 										<span class="btn btn-success" data-ng-click="addBgpNetwork(machine)">Add
 											Network</span>
 										<span class="btn btn-danger" data-ng-click="removeBgpNetwork(machine)"
@@ -558,6 +570,11 @@
 											<label>Description: </label>
 											<input type="text" title="description" class="form-control"
 												data-ng-model="machine.routing.bgp.remote[$index].description" />
+											<p>
+												<input title="default-originate" type="checkbox"
+													data-ng-model="machine.routing.bgp.remote[$index].defaultOriginate" />
+												default-originate
+											</p>
 										</div>
 										<div>
 											<label data-ng-show="machine.routingSoftware == 'quagga'">Directly in bgpd.conf:</label>
