@@ -219,6 +219,73 @@ span.btn {
 	display: none;
 }
 
+/* ------ BGP POLICIES ------ */
+
+#netkit td.bgp-policies {
+	max-width: none;
+	padding: 10px;
+}
+
+/* main.css gives every .ng-scope height: 100%, in table cells firefox resolves it and the cells stop growing */
+.bgp-policies .ng-scope {
+	height: auto;
+}
+
+.bgp-policies .form-inline .form-control {
+	margin: 2px 0;
+}
+
+.bgp-policies .policy-number {
+	width: 6em;
+}
+
+.bgp-policies .policy-type {
+	margin-top: 1.5em;
+	color: var(--main-color);
+}
+
+.bgp-policies .policy {
+	border-left: 3px solid var(--main-color);
+	padding-left: 10px;
+	margin-bottom: 1em;
+}
+
+.bgp-policies .policy-rule {
+	border-top: 1px solid lightgray;
+	padding: 5px 0;
+}
+
+.bgp-policies .route-map-clauses {
+	padding-left: 2em;
+}
+
+.bgp-policies th {
+	color: inherit;
+	background-color: transparent;
+	padding: 5px 10px;
+}
+
+.policy-note,
+.policy-hint {
+	color: darkgray;
+}
+
+.policy-explain {
+	color: #31708f;
+	font-style: italic;
+	margin: 0;
+}
+
+.policy-error {
+	color: #a94442;
+	margin: 0;
+}
+
+.policy-warning {
+	color: #8a6d3b;
+	margin: 0;
+}
+
 /* ------ BASH ------ */
 
 .bash {

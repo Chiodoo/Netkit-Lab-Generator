@@ -125,7 +125,7 @@ function makeRouterFrr(machine, lab) {
 				for (let interface of machine.routing.ospf.if) {
 					if (interface && interface !== undefined && interface.cost != "" && interface.cost) {
 						lab.file[machine.name + "/etc/frr/frr.conf"] += "interface eth" + interface.interface + "\n";
-						lab.file[machine.name + "/etc/frr/frr.conf"] += "ospf cost " + interface.cost + "\n";
+						lab.file[machine.name + "/etc/frr/frr.conf"] += "\tospf cost " + interface.cost + "\n";
 					}
 				}
 			}
@@ -146,23 +146,23 @@ function makeRouterRipFrr(machine, lab){
 
 	for (let network of machine.routing.rip.network)
 		if(network && network != "")
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "network " + network + "\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tnetwork " + network + "\n";
 
 	for (let route of machine.routing.rip.route) {
 		if (route && route != "")
-			lab.file[machine.name + "/etc/frr/frr.conf"] += "route " + route + "\n";
+			lab.file[machine.name + "/etc/frr/frr.conf"] += "\troute " + route + "\n";
 	}
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 
 		//nb: mantenere l'ordine
 	if (machine.routing.rip.en && machine.routing.rip.connected) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute connected\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute connected\n";
 	}
 	if (machine.routing.rip.en && machine.routing.rip.ospf) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute ospf\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute ospf\n";
 	}
 	if (machine.routing.rip.en && machine.routing.rip.bgp) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute bgp\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute bgp\n";
 	}
 
 	//Free conf
@@ -177,19 +177,19 @@ function makeRouterOspfFrr(machine, lab){
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "router ospf\n";
 	for (let m /* non trasformare in un for... of */ in machine.routing.ospf.network) {
 		if(machine.routing.ospf.network[m] && machine.routing.ospf.network[m] != "")
-			lab.file[machine.name + "/etc/frr/frr.conf"] += "network " + machine.routing.ospf.network[m] + " area " + machine.routing.ospf.area[m] + "\n";
+			lab.file[machine.name + "/etc/frr/frr.conf"] += "\tnetwork " + machine.routing.ospf.network[m] + " area " + machine.routing.ospf.area[m] + "\n";
 		if (machine.routing.ospf.stub[m] && machine.routing.ospf.stub[m]!="")
-			lab.file[machine.name + "/etc/frr/frr.conf"] += "area " + machine.routing.ospf.area[m] + " stub\n";
+			lab.file[machine.name + "/etc/frr/frr.conf"] += "\tarea " + machine.routing.ospf.area[m] + " stub\n";
 	}
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 	if (machine.routing.ospf.en && machine.routing.ospf.connected) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute connected\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute connected\n";
 	}
 	if (machine.routing.ospf.en && machine.routing.ospf.rip) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute rip\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute rip\n";
 	}
 	if (machine.routing.ospf.en && machine.routing.ospf.bgp) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "redistribute bgp\n";
+		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute bgp\n";
 	}
 
 	//Free conf
@@ -206,10 +206,15 @@ function makeBgpConfFrr(router, lab) {
 	lab.file[router.name + "/etc/frr/frr.conf"] += "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";
 	lab.file[router.name + "/etc/frr/frr.conf"] += "router bgp " + router.routing.bgp.as + "\n\n";
 
+	if (router.routing.bgp.noEbgpRequiresPolicy)
+		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp ebgp-requires-policy\n";
+	if (router.routing.bgp.noNetworkImportCheck)
+		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp network import-check\n";
+
 	// Inserimento tutte le Network su cui annunciare BGP
 	for (let network of router.routing.bgp.network) {
 		if (network && network != "") {
-			lab.file[router.name + "/etc/frr/frr.conf"] += "network " + network + "\n";
+			lab.file[router.name + "/etc/frr/frr.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
 	
@@ -217,18 +222,24 @@ function makeBgpConfFrr(router, lab) {
 	router.routing.bgp.remote.forEach(function (remote) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
 			//Aggiungo il remote-as
-			lab.file[router.name + "/etc/frr/frr.conf"] += "neighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
+			lab.file[router.name + "/etc/frr/frr.conf"] += "\tneighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
 
 			//Aggiungo la descrizione
 			if ((remote.description) && remote.description != "") {
-				lab.file[router.name + "/etc/frr/frr.conf"] += "neighbor " + remote.neighbor + " description " + remote.description + "\n";
+				lab.file[router.name + "/etc/frr/frr.conf"] += "\tneighbor " + remote.neighbor + " description " + remote.description + "\n";
 			}
 		}
 	});
 
+	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/frr/frr.conf"] += router.routing.bgp.free + "\n";
+
+	//Definizione delle policy: fuori dal blocco router bgp
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(router.routing.bgp, "frr");
 }
 
 /* ------------------------------------------------------ */
@@ -259,11 +270,11 @@ function makeRouterQuagga(machine, lab) {
 					+ "router rip\n";
 
 				for (let network of machine.routing.rip.network)
-					lab.file[machine.name + "/etc/zebra/ripd.conf"] += "network " + network + "\n";
+					lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tnetwork " + network + "\n";
 
 				for (let route of machine.routing.rip.route) {
 					if (route && route != "")
-						lab.file[machine.name + "/etc/zebra/ripd.conf"] += "route " + route + "\n";
+						lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\troute " + route + "\n";
 				}
 				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\n";
 			}
@@ -278,9 +289,9 @@ function makeRouterQuagga(machine, lab) {
 					+ "router ospf\n";
 
 				for (let m /* non trasformare in un for... of */ in machine.routing.ospf.network) {
-					lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "network " + machine.routing.ospf.network[m] + " area " + machine.routing.ospf.area[m] + "\n";
+					lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tnetwork " + machine.routing.ospf.network[m] + " area " + machine.routing.ospf.area[m] + "\n";
 					if (machine.routing.ospf.stub[m])
-						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "area " + machine.routing.ospf.area[m] + " stub\n";
+						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tarea " + machine.routing.ospf.area[m] + " stub\n";
 				}
 				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\n";
 			}
@@ -289,22 +300,22 @@ function makeRouterQuagga(machine, lab) {
 
 			//nb: mantenere l'ordine
 			if (machine.routing.rip.en && machine.routing.rip.connected) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "redistribute connected\n";
+				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute connected\n";
 			}
 			if (machine.routing.ospf.en && machine.routing.ospf.connected) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "redistribute connected\n";
+				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute connected\n";
 			}
 			if (machine.routing.rip.en && machine.routing.rip.ospf) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "redistribute ospf\n";
+				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute ospf\n";
 			}
 			if (machine.routing.rip.en && machine.routing.rip.bgp) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "redistribute bgp\n";
+				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute bgp\n";
 			}
 			if (machine.routing.ospf.en && machine.routing.ospf.rip) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "redistribute rip\n";
+				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute rip\n";
 			}
 			if (machine.routing.ospf.en && machine.routing.ospf.bgp) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "redistribute bgp\n";
+				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute bgp\n";
 			}
 
 			//nb: i costi vanno qui alla fine
@@ -312,7 +323,7 @@ function makeRouterQuagga(machine, lab) {
 				for (let interface of machine.routing.ospf.if) {
 					if (interface.cost != "" && interface.cost) {
 						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "interface eth" + interface.interface + "\n";
-						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "ospf cost " + interface.cost + "\n";
+						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tospf cost " + interface.cost + "\n";
 					}
 				}
 			}
@@ -351,7 +362,7 @@ function makeBgpConfQuagga(router, lab) {
 	// Inserimento tutte le Network su cui annunciare BGP
 	for (let network of router.routing.bgp.network) {
 		if (network && network != "") {
-			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "network " + network + "\n";
+			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
 
@@ -360,18 +371,24 @@ function makeBgpConfQuagga(router, lab) {
 	router.routing.bgp.remote.forEach(function (remote) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
 			//Aggiungo il remote-as
-			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "neighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
+			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tneighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
 
 			//Aggiungo la descrizione
 			if ((remote.description) && remote.description != "") {
-				lab.file[router.name + "/etc/zebra/bgpd.conf"] += "neighbor " + remote.neighbor + " description " + remote.description + "\n";
+				lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tneighbor " + remote.neighbor + " description " + remote.description + "\n";
 			}
 		}
 	});
 
+	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\n" + router.routing.bgp.free + "\n";
+
+	//Definizione delle policy: fuori dal blocco router bgp
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpPolicyDefinitions(router.routing.bgp, "quagga");
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\nlog file /var/log/zebra/bgpd.log\n\n"
 		+ "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";
@@ -629,7 +646,7 @@ function makeRyuController(netkit, lab) {
 
 function makeFilesStructure(netkit, labInfo) {
 	let isAllValidNames = netkit
-		.map(machine => machine.name && /[A-z0-9]+/i.test(machine.name))
+		.map(machine => machine.name && /^[A-Za-z0-9_-]+$/.test(machine.name))
 		.reduce((prev, curr, ind) => ind == 0 ? curr : (prev && curr))	// Tutti i nomi devono aver soddisfatto la regex
 	if (!isAllValidNames)
 		return { folders: [], file: [] }
@@ -666,15 +683,18 @@ function makeScript(lab) {
 		+ "mkdir \"$(dirname \"$0\")/lab\"\n"
 		+ "cd \"$(dirname \"$0\")/lab\"\n";
 
+	// quoting for the shell; plain paths stay unquoted so usual scripts do not change
+	let shq = s => /^[\w.\/-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+
 	for (let folderName of lab.folders) {
-		if (folderName != "") text += "mkdir -p " + folderName + "\n";
+		if (folderName != "") text += "mkdir -p " + shq(folderName) + "\n";
 	}
 
 	for (let fileName in lab.file) {
-		text += "\ntouch " + fileName + "\n";
+		text += "\ntouch " + shq(fileName) + "\n";
 		let lines = lab.file[fileName].split("\n");
 		for (let line of lines) {
-			if (line != "") text += "echo '" + line + "' >> " + fileName + "\n";
+			if (line != "") text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + shq(fileName) + "\n";
 		}
 	}
 
