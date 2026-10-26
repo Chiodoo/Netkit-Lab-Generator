@@ -97,6 +97,18 @@ badR10.routing.bgp.policies[0].rules[0].le = 8;
 lab = ctx.makeFilesStructure(bad.netkit, bad.labInfo);
 assert.match(lab.file["r10/etc/frr/frr.conf"], /! prefix-list peerIn seq 5 skipped: le must not be smaller/);
 
+/* values from an imported file cannot escape the generated config or the echo quoting of the .sh script */
+const evil = loadConfig("examples/example_bgp_policies.config");
+const evilB03 = evil.netkit.find(m => m.name == "b03").routing.bgp;
+evilB03.policies.find(p => p.name == "acceptIn").rules[0].seq = "5'; touch pwned; '\nip route 0.0.0.0/0 1.2.3.4";
+evilB03.policies.find(p => p.name == "viaAs2").name = "x'; touch pwned; '";
+evilB03.free = "! it's free text";
+lab = ctx.makeFilesStructure(evil.netkit, evil.labInfo);
+const evilConf = lab.file["b03/etc/frr/frr.conf"];
+assert.ok(!/pwned|ip route/.test(evilConf), "raw values copied into the config");
+assert.match(evilConf, /match as-path: the as-path has an invalid name/);
+assert.ok(ctx.makeScript(lab).includes("echo '! it'\\''s free text' >> b03/etc/frr/frr.conf"));
+
 /* configurations exported before policies existed still work */
 const old = loadConfig("examples/example_lab.config");
 assert.ok(old.netkit.every(m => Array.isArray(m.routing.bgp.policies)));

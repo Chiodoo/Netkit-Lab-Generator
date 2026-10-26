@@ -691,7 +691,7 @@ function makeScript(lab) {
 		text += "\ntouch " + fileName + "\n";
 		let lines = lab.file[fileName].split("\n");
 		for (let line of lines) {
-			if (line != "") text += "echo '" + line + "' >> " + fileName + "\n";
+			if (line != "") text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + fileName + "\n";
 		}
 	}
 

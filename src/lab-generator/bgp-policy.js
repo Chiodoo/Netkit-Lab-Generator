@@ -158,7 +158,9 @@ function routeMapRuleError(rule, policies) {
 	for (let m of rule.matches) {
 		let def = ROUTE_MAP_MATCHES.find(d => d.match == m.match);
 		if (!def) return "unknown match";
-		if (!findPolicy(policies, m.value, def.type)) return "match " + m.match + ": choose a " + def.type;
+		let used = findPolicy(policies, m.value, def.type);
+		if (!used) return "match " + m.match + ": choose a " + def.type;
+		if (policyNameError(used)) return "match " + m.match + ": the " + def.type + " has an invalid name";
 	}
 	for (let s of rule.sets) {
 		let err = setValueError(s);
@@ -307,7 +309,8 @@ function bgpPolicyDefinitions(bgp, routingSoftware) {
 			}
 			for (let rule of sortedRules(policy)) {
 				let err = policyRuleError(policies, policy, rule);
-				if (err) text += "! " + policy.type + " " + policy.name + " seq " + rule.seq + " skipped: " + err + "\n";
+				// seq may be anything in an imported file: never copy it raw into the config
+				if (err) text += "! " + policy.type + " " + policy.name + " seq " + (isUint(rule.seq, MAX_UINT32) ? rule.seq : "(invalid)") + " skipped: " + err + "\n";
 				else text += policyRuleLines(policies, policy, rule, routingSoftware == "quagga");
 			}
 		}
