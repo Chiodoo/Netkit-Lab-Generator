@@ -157,6 +157,11 @@ app.controller("nc", function ($location, $anchorScroll, $scope) {
 		}
 	};
 
+	// networks and neighbor IPs offered by the <datalist>s, recomputed only when the lab changes
+	$scope.$watch("netkit", function (netkit) {
+		$scope.suggest = labSuggestions(netkit);
+	}, true);
+
 	$scope.makeDownload = function (text, filename) {
 		var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
 		saveAs(blob, filename, true);

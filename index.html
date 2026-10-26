@@ -195,6 +195,15 @@
 					</table>
 				</div>
 
+				<!-- SUGGESTIONS (networks already in the lab, any value can still be typed) -->
+				<datalist id="lab-networks">
+					<option data-ng-repeat="n in suggest.networks" value="{{n.value}}">{{n.label}}</option>
+				</datalist>
+				<datalist id="lab-prefixes">
+					<option value="any">any prefix</option>
+					<option data-ng-repeat="n in suggest.networks" value="{{n.value}}">{{n.label}}</option>
+				</datalist>
+
 				<!-- NETWORK TABLE -->
 				<table id="netkit">
 					<tbody>
@@ -207,9 +216,15 @@
 						</tr>
 
 						<!-- each row is a machine -->
-						<tr data-ng-repeat="machine in netkit track by $index">
+						<tr data-ng-repeat="machine in netkit track by $index" data-ng-init="mIdx = $index">
 							<td>
 								<div id="{{machine._uid}}" class="anchor-id"></div>
+								<datalist id="peers-{{mIdx}}">
+									<option data-ng-repeat="p in suggest.peers[mIdx]" value="{{p.value}}">{{p.label}}</option>
+								</datalist>
+								<datalist id="gateways-{{mIdx}}">
+									<option data-ng-repeat="p in suggest.gateways[mIdx]" value="{{p.value}}">{{p.label}}</option>
+								</datalist>
 								<div>
 									<label>Machine {{machine.row}}:</label>
 									<input type="text" data-ng-model="machine.name" class="form-control"
@@ -302,13 +317,13 @@
 										<div>
 											<label>Route (empty for default gw):</label>
 											<input type="text" data-ng-model="gateway.route" class="form-control"
-												placeholder="0.0.0.0/0"
+												placeholder="0.0.0.0/0" list="lab-networks"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}/[0-9]+$" />
 										</div>
 										<div>
 											<label>GW (empty to generate nothing):</label>
 											<input type="text" data-ng-model="gateway.gw" class="form-control"
-												placeholder="0.0.0.0"
+												placeholder="0.0.0.0" list="gateways-{{mIdx}}"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}$" />
 										</div>
 										<div>
@@ -424,7 +439,7 @@
 											<label>Network: </label>
 											<input type="text" placeholder="0.0.0.0/0" required
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}/[0-9]+$"
-												class="form-control"
+												class="form-control" list="lab-networks"
 												data-ng-model="machine.routing.rip.network[$index]" />
 										</div>
 										<hr>
@@ -436,7 +451,7 @@
 											<label>Route (empty to omit): </label>
 											<input type="text" placeholder="0.0.0.0/0"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}/[0-9]+$"
-												class="form-control"
+												class="form-control" list="lab-networks"
 												data-ng-model="machine.routing.rip.route[$index]" />
 										</div>
 										<div>
@@ -474,7 +489,7 @@
 												<label>Network: </label>
 												<input type="text" placeholder="0.0.0.0/0" required
 													pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}/[0-9]+$"
-													class="form-control"
+													class="form-control" list="lab-networks"
 													data-ng-model="machine.routing.ospf.network[$index]" />
 											</div>
 											<div>
@@ -550,7 +565,7 @@
 											<label>Network: </label>
 											<input type="text" placeholder="0.0.0.0/0"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}/[0-9]+$"
-												class="form-control"
+												class="form-control" list="lab-networks"
 												data-ng-model="machine.routing.bgp.network[$index]" />
 										</div>
 										<span class="btn btn-success" data-ng-click="addBgpNeighbor(machine)">Add
@@ -562,7 +577,7 @@
 											<label>Neighbor (empty to omit): </label>
 											<input type="text" placeholder="0.0.0.0"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}$"
-												class="form-control"
+												class="form-control" list="peers-{{mIdx}}"
 												data-ng-model="machine.routing.bgp.remote[$index].neighbor" />
 											<label>Remote-AS: </label>
 											<input type="text" placeholder="0" pattern="^[0-9]*$" class="form-control"
