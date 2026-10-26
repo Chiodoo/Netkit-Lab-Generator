@@ -646,7 +646,7 @@ function makeRyuController(netkit, lab) {
 
 function makeFilesStructure(netkit, labInfo) {
 	let isAllValidNames = netkit
-		.map(machine => machine.name && /[A-z0-9]+/i.test(machine.name))
+		.map(machine => machine.name && /^[A-Za-z0-9_-]+$/.test(machine.name))
 		.reduce((prev, curr, ind) => ind == 0 ? curr : (prev && curr))	// Tutti i nomi devono aver soddisfatto la regex
 	if (!isAllValidNames)
 		return { folders: [], file: [] }
@@ -683,15 +683,18 @@ function makeScript(lab) {
 		+ "mkdir \"$(dirname \"$0\")/lab\"\n"
 		+ "cd \"$(dirname \"$0\")/lab\"\n";
 
+	// quoting for the shell; plain paths stay unquoted so usual scripts do not change
+	let shq = s => /^[\w.\/-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+
 	for (let folderName of lab.folders) {
-		if (folderName != "") text += "mkdir -p " + folderName + "\n";
+		if (folderName != "") text += "mkdir -p " + shq(folderName) + "\n";
 	}
 
 	for (let fileName in lab.file) {
-		text += "\ntouch " + fileName + "\n";
+		text += "\ntouch " + shq(fileName) + "\n";
 		let lines = lab.file[fileName].split("\n");
 		for (let line of lines) {
-			if (line != "") text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + fileName + "\n";
+			if (line != "") text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + shq(fileName) + "\n";
 		}
 	}
 

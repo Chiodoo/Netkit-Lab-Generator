@@ -108,6 +108,10 @@ const evilConf = lab.file["b03/etc/frr/frr.conf"];
 assert.ok(!/pwned|ip route/.test(evilConf), "raw values copied into the config");
 assert.match(evilConf, /match as-path: the as-path has an invalid name/);
 assert.ok(ctx.makeScript(lab).includes("echo '! it'\\''s free text' >> b03/etc/frr/frr.conf"));
+// file names are quoted when needed, machine names must be plain words
+assert.ok(ctx.makeScript({ folders: ["a b"], file: { "x;y": "z" } }).includes("touch 'x;y'\necho 'z' >> 'x;y'"));
+evil.netkit[0].name = "../escape";
+assert.equal(Object.keys(ctx.makeFilesStructure(evil.netkit, evil.labInfo).file).length, 0);
 
 /* configurations exported before policies existed still work */
 const old = loadConfig("examples/example_lab.config");
