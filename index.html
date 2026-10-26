@@ -216,7 +216,7 @@
 						</tr>
 
 						<!-- each row is a machine -->
-						<tr data-ng-repeat="machine in netkit track by $index" data-ng-init="mIdx = $index">
+						<tr data-ng-repeat-start="machine in netkit track by $index" data-ng-init="mIdx = $index">
 							<td>
 								<div id="{{machine._uid}}" class="anchor-id"></div>
 								<datalist id="peers-{{mIdx}}">
@@ -591,6 +591,7 @@
 												default-originate
 											</p>
 										</div>
+										<p class="policy-hint">Prefix-lists, access-lists, route-maps and their use on the neighbors: see the row below this machine.</p>
 										<div>
 											<label data-ng-show="machine.routingSoftware == 'quagga'">Directly in bgpd.conf:</label>
 											<label data-ng-show="machine.routingSoftware == 'frr'">Directly after bgp config in frr.conf:</label>
@@ -604,6 +605,164 @@
 										<textarea title="free" rows="3" class="form-control"
 											data-ng-model="machine.routing.frr.free"></textarea>
 									</div>
+								</div>
+							</td>
+						</tr>
+
+						<!-- BGP POLICIES of the router above (full width) -->
+						<tr data-ng-repeat-end data-ng-show="machine.type == 'router' && machine.routing.bgp.en">
+							<td colspan="4" class="bgp-policies">
+								<div data-ng-if="machine.type == 'router' && machine.routing.bgp.en"
+									data-ng-init="newPolicy = {type: 'prefix-list'}">
+									<label>BGP policies of {{machine.name || 'machine ' + machine.row}}</label>
+									<p class="policy-note">
+										Rules are evaluated by increasing sequence number and the first matching rule wins.
+										Every prefix-list, access-list, as-path access-list and route-map ends with an
+										implicit <code>deny any</code>: whatever is not permitted by a rule is filtered out.
+									</p>
+									<div class="form-inline">
+										<select class="form-control" title="policy type" data-ng-model="newPolicy.type"
+											data-ng-options="t.type as t.label for t in POLICY_TYPES"></select>
+										<button type="button" class="btn btn-success"
+											data-ng-click="addPolicy(machine, newPolicy.type)">Add</button>
+									</div>
+
+									<div data-ng-repeat="t in POLICY_TYPES" data-ng-show="policiesOfType(machine, t.type).length">
+										<h4 class="policy-type">{{t.label}}s</h4>
+										<p class="policy-note" data-ng-if="t.type == 'access-list'">
+											An access-list matches the given prefix and every more specific prefix inside it,
+											unless exact-match is set.
+										</p>
+										<p class="policy-note" data-ng-if="t.type == 'as-path'">
+											Regular expression on the AS path: <code>_20_</code> AS 20 anywhere,
+											<code>^20_</code> received from AS 20, <code>_20$</code> originated by AS 20,
+											<code>^$</code> originated in this AS.
+										</p>
+										<p class="policy-note" data-ng-if="t.type == 'route-map'">
+											Without match every announcement matches. Matches of different kinds are in AND,
+											matches of the same kind are in OR. Without set the announcement is unchanged.
+										</p>
+										<div class="policy" data-ng-repeat="policy in policiesOfType(machine, t.type)">
+											<div class="form-inline">
+												<label>Name:</label>
+												<input type="text" class="form-control" title="name" required
+													pattern="[A-Za-z0-9_.\-]+" data-ng-model="policy.name"
+													data-ng-model-options="{allowInvalid: true}" />
+												<button type="button" class="btn btn-success btn-sm"
+													data-ng-click="addPolicyRule(policy)">Add rule</button>
+												<button type="button" class="btn btn-danger btn-sm"
+													data-ng-click="removePolicy(machine, policy)">Remove {{t.label}}</button>
+											</div>
+											<p class="policy-error" data-ng-show="policyError(machine, policy)">
+												{{policyError(machine, policy)}}</p>
+											<p class="policy-warning" data-ng-show="policyWarning(policy)">
+												{{policyWarning(policy)}}</p>
+
+											<div class="policy-rule" data-ng-repeat="rule in policy.rules | orderBy:'seq'">
+												<div class="form-inline">
+													<label>seq</label>
+													<input type="number" class="form-control policy-number" min="1"
+														title="sequence number" data-ng-model="rule.seq"
+														data-ng-model-options="{updateOn: 'blur', allowInvalid: true}" />
+													<select class="form-control" title="action" data-ng-model="rule.action">
+														<option value="permit">permit</option>
+														<option value="deny">deny</option>
+													</select>
+													<input type="text" class="form-control" title="prefix" required
+														data-ng-if="t.type == 'prefix-list' || t.type == 'access-list'"
+														placeholder="10.0.0.0/8 or any" list="lab-prefixes"
+														pattern="any|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)/(3[0-2]|[12]?\d)"
+														data-ng-model="rule.prefix" data-ng-model-options="{allowInvalid: true}" />
+													<span data-ng-if="t.type == 'prefix-list'">
+														<label>ge</label>
+														<input type="number" class="form-control policy-number" min="0" max="32"
+															title="ge" data-ng-model="rule.ge"
+															data-ng-model-options="{allowInvalid: true}" />
+														<label>le</label>
+														<input type="number" class="form-control policy-number" min="0" max="32"
+															title="le" data-ng-model="rule.le"
+															data-ng-model-options="{allowInvalid: true}" />
+													</span>
+													<label data-ng-if="t.type == 'access-list'" data-ng-hide="rule.prefix == 'any'">
+														<input type="checkbox" title="exact-match" data-ng-model="rule.exactMatch" />
+														exact-match
+													</label>
+													<input type="text" class="form-control" title="regular expression" required
+														data-ng-if="t.type == 'as-path'" placeholder="_20_"
+														data-ng-model="rule.regex" />
+													<button type="button" class="btn btn-default btn-sm" title="move up"
+														data-ng-click="movePolicyRule(policy, rule, -1)" data-ng-disabled="$first">&uarr;</button>
+													<button type="button" class="btn btn-default btn-sm" title="move down"
+														data-ng-click="movePolicyRule(policy, rule, 1)" data-ng-disabled="$last">&darr;</button>
+													<button type="button" class="btn btn-danger btn-sm" title="remove rule"
+														data-ng-click="removePolicyRule(policy, rule)">&times;</button>
+												</div>
+
+												<div data-ng-if="t.type == 'route-map'" class="route-map-clauses">
+													<div class="form-inline" data-ng-repeat="m in rule.matches">
+														<label>match</label>
+														<select class="form-control" title="match" data-ng-model="m.match"
+															data-ng-change="m.value = null"
+															data-ng-options="d.match as d.match for d in ROUTE_MAP_MATCHES"></select>
+														<select class="form-control" title="list" data-ng-model="m.value"
+															data-ng-options="p.id as p.name for p in policiesOfType(machine, matchListType(m.match))">
+															<option value="">choose a {{matchListType(m.match)}}</option>
+														</select>
+														<button type="button" class="btn btn-danger btn-sm" title="remove match"
+															data-ng-click="rule.matches.splice($index, 1)">&times;</button>
+													</div>
+													<div class="form-inline" data-ng-repeat="st in rule.sets">
+														<label>set</label>
+														<select class="form-control" title="set" data-ng-model="st.set"
+															data-ng-options="d.set as d.set for d in ROUTE_MAP_SETS"></select>
+														<input type="text" class="form-control" title="value" required
+															placeholder="{{setPlaceholder(st.set)}}" data-ng-model="st.value" />
+														<button type="button" class="btn btn-danger btn-sm" title="remove set"
+															data-ng-click="rule.sets.splice($index, 1)">&times;</button>
+													</div>
+													<button type="button" class="btn btn-success btn-sm"
+														data-ng-click="rule.matches.push({match: 'ip address prefix-list', value: null})">Add match</button>
+													<button type="button" class="btn btn-success btn-sm"
+														data-ng-click="rule.sets.push({set: 'local-preference', value: ''})">Add set</button>
+												</div>
+
+												<p class="policy-explain">{{policyRuleExplain(machine, policy, rule)}}</p>
+												<p class="policy-error" data-ng-show="policyRuleError(machine, policy, rule)">
+													{{policyRuleError(machine, policy, rule)}}</p>
+												<p class="policy-warning" data-ng-show="policyRuleWarning(policy, rule)">
+													{{policyRuleWarning(policy, rule)}}</p>
+											</div>
+										</div>
+									</div>
+
+									<h4 class="policy-type">Policies applied to the neighbors</h4>
+									<p class="policy-note">
+										At most one policy of each kind per direction: a second one would overwrite the first.
+										A distribute-list uses an access-list, a filter-list uses an as-path access-list.
+									</p>
+									<table class="policy-neighbors">
+										<tr>
+											<th>Neighbor</th>
+											<th data-ng-repeat="c in NEIGHBOR_POLICY_CMDS">{{c.cmd}}</th>
+										</tr>
+										<tr data-ng-repeat-start="bremote in machine.routing.bgp.remote track by $index"
+											data-ng-show="bremote.neighbor">
+											<td>{{bremote.neighbor}}<br><small>AS {{bremote.as}} {{bremote.description}}</small></td>
+											<td data-ng-repeat="c in NEIGHBOR_POLICY_CMDS">
+												<div class="form-inline" data-ng-repeat="dir in DIRECTIONS">
+													<label>{{dir}}</label>
+													<select class="form-control" title="{{c.cmd}} {{dir}}"
+														data-ng-model="bremote.apply[c.cmd][dir]"
+														data-ng-options="p.id as p.name for p in policiesOfType(machine, c.type)">
+														<option value="">-</option>
+													</select>
+												</div>
+											</td>
+										</tr>
+										<tr data-ng-repeat-end data-ng-show="bremote.neighbor && neighborPolicyError(bremote)">
+											<td colspan="5" class="policy-error">{{neighborPolicyError(bremote)}}</td>
+										</tr>
+									</table>
 								</div>
 							</td>
 						</tr>

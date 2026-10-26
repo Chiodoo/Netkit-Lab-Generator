@@ -157,10 +157,73 @@ app.controller("nc", function ($location, $anchorScroll, $scope) {
 		}
 	};
 
+	/* ---------- BGP policies (logic in bgp-policy.js) ---------- */
+
+	$scope.POLICY_TYPES = POLICY_TYPES;
+	$scope.NEIGHBOR_POLICY_CMDS = NEIGHBOR_POLICY_CMDS;
+	$scope.ROUTE_MAP_MATCHES = ROUTE_MAP_MATCHES;
+	$scope.ROUTE_MAP_SETS = ROUTE_MAP_SETS;
+	$scope.DIRECTIONS = ["in", "out"];
+
 	// networks and neighbor IPs offered by the <datalist>s, recomputed only when the lab changes
 	$scope.$watch("netkit", function (netkit) {
 		$scope.suggest = labSuggestions(netkit);
 	}, true);
+
+	$scope.policiesOfType = function (machine, type) {
+		return machine.routing.bgp.policies.filter(p => p.type == type);
+	};
+
+	$scope.addPolicy = function (machine, type) {
+		let policies = machine.routing.bgp.policies;
+		let base = type.replace(/-(\w)/g, (s, c) => c.toUpperCase()), n = 1;
+		while (policies.some(p => p.type == type && p.name == base + n)) n++;
+		let policy = { id: Math.floor((Math.random() * (1000 ** 5)) + 1), type: type, name: base + n, rules: [] };
+		policies.push(policy);
+		$scope.addPolicyRule(policy);
+	};
+
+	$scope.removePolicy = function (machine, policy) {
+		let refs = policyReferences(machine.routing.bgp, policy);
+		if (refs.length) {
+			alert("Cannot delete " + policy.type + " " + policy.name + ", it is used by:\n- " + refs.join("\n- ") + "\nRemove these references first.");
+		} else if (confirm("Are you sure you want to remove the " + policy.type + " " + policy.name + "?")) {
+			let policies = machine.routing.bgp.policies;
+			policies.splice(policies.indexOf(policy), 1);
+		}
+	};
+
+	$scope.addPolicyRule = function (policy) {
+		let step = policy.type == "route-map" ? 10 : 5;
+		let rule = { seq: Math.max(0, ...policy.rules.map(r => +r.seq || 0)) + step, action: "permit" };
+		if (policy.type == "prefix-list") Object.assign(rule, { prefix: "", ge: null, le: null });
+		if (policy.type == "access-list") Object.assign(rule, { prefix: "", exactMatch: false });
+		if (policy.type == "as-path") rule.regex = "";
+		if (policy.type == "route-map") Object.assign(rule, { matches: [], sets: [] });
+		policy.rules.push(rule);
+	};
+
+	$scope.removePolicyRule = function (policy, rule) {
+		if (confirm("Are you sure you want to remove the rule with seq " + rule.seq + "?")) {
+			policy.rules.splice(policy.rules.indexOf(rule), 1);
+		}
+	};
+
+	// rules are always shown in seq order: moving a rule swaps its seq with the adjacent one
+	$scope.movePolicyRule = function (policy, rule, delta) {
+		let sorted = sortedRules(policy);
+		let other = sorted[sorted.indexOf(rule) + delta];
+		if (other) [rule.seq, other.seq] = [other.seq, rule.seq];
+	};
+
+	$scope.policyError = (machine, policy) => policyError(machine.routing.bgp.policies, policy);
+	$scope.policyWarning = policyWarning;
+	$scope.policyRuleError = (machine, policy, rule) => policyRuleError(machine.routing.bgp.policies, policy, rule);
+	$scope.policyRuleWarning = policyRuleWarning;
+	$scope.policyRuleExplain = (machine, policy, rule) => policyRuleExplain(machine.routing.bgp.policies, policy, rule);
+	$scope.neighborPolicyError = neighborPolicyError;
+	$scope.matchListType = match => ROUTE_MAP_MATCHES.find(d => d.match == match).type;
+	$scope.setPlaceholder = set => ROUTE_MAP_SETS.find(d => d.set == set).placeholder;
 
 	$scope.makeDownload = function (text, filename) {
 		var blob = new Blob([text], { type: "text/plain;charset=utf-8" });
