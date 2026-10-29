@@ -301,7 +301,7 @@ function bgpPolicyDefinitions(bgp, routingSoftware) {
 	let policies = bgp.policies || [], text = "";
 	for (let t of POLICY_TYPES) {
 		for (let policy of policies.filter(p => p.type == t.type)) {
-			text += "!\n";
+			text += "!\n\n";
 			let nameErr = policyNameError(policy);
 			if (nameErr) {
 				text += "! " + policy.type + " skipped: " + nameErr + "\n";
