@@ -125,17 +125,17 @@ function makeRouterFrr(machine, lab) {
 				for (let interface of machine.routing.ospf.if) {
 					if (interface && interface !== undefined && interface.cost != "" && interface.cost) {
 						lab.file[machine.name + "/etc/frr/frr.conf"] += "interface eth" + interface.interface + "\n";
-						lab.file[machine.name + "/etc/frr/frr.conf"] += "\tospf cost " + interface.cost + "\n";
+						lab.file[machine.name + "/etc/frr/frr.conf"] += "\tospf cost " + interface.cost + "\n\n";
 					}
 				}
 			}
 
 			//Free conf
 			if(machine.routing.frr.free && machine.routing.frr.free != ""){
-				lab.file[machine.name + "/etc/frr/frr.conf"] += "\n" + machine.routing.frr.free + "\n";
+				lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.frr.free + "\n\n";
 			}
 			//nb: e infine i log
-			lab.file[machine.name + "/etc/frr/frr.conf"] += "\nlog file /var/log/frr/frr.log\n";
+			lab.file[machine.name + "/etc/frr/frr.conf"] += "log file /var/log/frr/frr.log\n";
 		}
 }
 
@@ -152,7 +152,6 @@ function makeRouterRipFrr(machine, lab){
 		if (route && route != "")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += "\troute " + route + "\n";
 	}
-	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 
 		//nb: mantenere l'ordine
 	if (machine.routing.rip.en && machine.routing.rip.connected) {
@@ -170,6 +169,7 @@ function makeRouterRipFrr(machine, lab){
 		if (machine.routing.rip.free && machine.routing.rip.free != "")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.rip.free + "\n";
 	}
+	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 
 function makeRouterOspfFrr(machine, lab){
@@ -181,7 +181,6 @@ function makeRouterOspfFrr(machine, lab){
 		if (machine.routing.ospf.stub[m] && machine.routing.ospf.stub[m]!="")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += "\tarea " + machine.routing.ospf.area[m] + " stub\n";
 	}
-	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 	if (machine.routing.ospf.en && machine.routing.ospf.connected) {
 		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute connected\n";
 	}
@@ -197,14 +196,14 @@ function makeRouterOspfFrr(machine, lab){
 		if (machine.routing.ospf.free && machine.routing.ospf.free != "")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.ospf.free + "\n";
 	}
-
+	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 
 function makeBgpConfFrr(router, lab) {
 	lab.file[router.name + "/etc/frr/daemons"] += "bgpd=yes\n";
 	
-	lab.file[router.name + "/etc/frr/frr.conf"] += "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";
-	lab.file[router.name + "/etc/frr/frr.conf"] += "router bgp " + router.routing.bgp.as + "\n\n";
+	lab.file[router.name + "/etc/frr/frr.conf"] += "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n\n";
+	lab.file[router.name + "/etc/frr/frr.conf"] += "router bgp " + router.routing.bgp.as + "\n";
 
 	if (router.routing.bgp.noEbgpRequiresPolicy)
 		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp ebgp-requires-policy\n";
@@ -217,8 +216,7 @@ function makeBgpConfFrr(router, lab) {
 			lab.file[router.name + "/etc/frr/frr.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
-	
-	lab.file[router.name + "/etc/frr/frr.conf"] += "\n";
+
 	router.routing.bgp.remote.forEach(function (remote) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
 			//Aggiungo il remote-as
@@ -239,7 +237,7 @@ function makeBgpConfFrr(router, lab) {
 		lab.file[router.name + "/etc/frr/frr.conf"] += router.routing.bgp.free + "\n";
 
 	//Definizione delle policy: fuori dal blocco router bgp
-	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(router.routing.bgp, "frr");
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(router.routing.bgp, "frr") + "\n";
 }
 
 /* ------------------------------------------------------ */
@@ -693,8 +691,9 @@ function makeScript(lab) {
 	for (let fileName in lab.file) {
 		text += "\ntouch " + shq(fileName) + "\n";
 		let lines = lab.file[fileName].split("\n");
+		if (lines[lines.length - 1] == "") lines.pop();
 		for (let line of lines) {
-			if (line != "") text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + shq(fileName) + "\n";
+			text += "echo '" + line.replace(/'/g, "'\\''") + "' >> " + shq(fileName) + "\n";
 		}
 	}
 
