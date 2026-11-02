@@ -165,10 +165,8 @@ function makeRouterRipFrr(machine, lab){
 	}
 
 	//Free conf
-	if (machine.routing.rip.en && machine.routing.rip.connected){
-		if (machine.routing.rip.free && machine.routing.rip.free != "")
-			lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.rip.free + "\n";
-	}
+	if (machine.routing.rip.free && machine.routing.rip.free != "")
+		lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.rip.free + "\n";
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 
@@ -192,10 +190,8 @@ function makeRouterOspfFrr(machine, lab){
 	}
 
 	//Free conf
-	if (machine.routing.ospf.en && machine.routing.ospf.connected){
-		if (machine.routing.ospf.free && machine.routing.ospf.free != "")
-			lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.ospf.free + "\n";
-	}
+	if (machine.routing.ospf.free && machine.routing.ospf.free != "")
+		lab.file[machine.name + "/etc/frr/frr.conf"] += machine.routing.ospf.free + "\n";
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 

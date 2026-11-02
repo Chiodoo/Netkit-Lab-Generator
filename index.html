@@ -35,10 +35,10 @@
 						<a data-ng-click="makeGraphIfChanged(netkit)" onclick="toggle_tab('graph')">Topology</a>
 					</li>
 					<li>
-						<a onclick="toggle_submenu(0)">Download Lab</a>
+						<a data-ng-click="showCheck = false" onclick="toggle_submenu(0)">Download Lab</a>
 					</li>
 					<li>
-						<a onclick="toggle_submenu(1)">Save &amp; Load</a>
+						<a data-ng-click="showCheck = false" onclick="toggle_submenu(1)">Save &amp; Load</a>
 					</li>
 					<li id="run-on-host" class="hidden">
 						<a onclick="toggle_submenu(2)" style="text-decoration: underline">Run on Host</a>
@@ -48,8 +48,32 @@
 							SDN manager
 						</a>
 					</li>
+					<li>
+						<a data-ng-click="showCheck = !showCheck" onclick="toggle_submenu(-1)">Check Lab
+							<span class="badge check-badge-error" data-ng-show="lintErrors" title="errors">{{lintErrors}}</span>
+							<span class="badge check-badge-warning" data-ng-show="lintWarnings" title="warnings">{{lintWarnings}}</span>
+						</a>
+					</li>
+					<li>
+						<a data-ng-click="copyScript()" title="Copy the .sh script to the clipboard">{{copied || "Copy Script"}}</a>
+					</li>
 				</ul>
 			</nav>
+
+			<!-- Check Lab -->
+			<div id="check-panel" class="ng-hide" data-ng-show="showCheck">
+				<button type="button" class="close" title="close" data-ng-click="showCheck = false">&times;</button>
+				<p data-ng-hide="issues.length" class="check-ok">No problems found.</p>
+				<p data-ng-show="issues.length">
+					<strong>{{lintErrors}} error(s), {{lintWarnings}} warning(s).</strong>
+					Errors break the lab, warnings are probably typos. Click a problem to go to its machine.
+				</p>
+				<ul>
+					<li data-ng-repeat="issue in issues" class="check-{{issue.level}}">
+						<a data-ng-click="goToIssue(issue)">{{issue.text}}</a>
+					</li>
+				</ul>
+			</div>
 
 			<!-- Sub-menu Download Lab -->
 			<nav id="submenu-0"
@@ -57,11 +81,11 @@
 				<script src="src/static/vendor/js/jszip.min.js"></script>
 				<ul class="nav navbar-nav">
 					<li>
-						<a data-ng-click="makeDownload(generateScript(netkit, labInfo), 'netkit.script')"
+						<a data-ng-click="labReady() && makeDownload(generateScript(netkit, labInfo), 'netkit.script')"
 							onclick="toggle_submenu(-1)">Download .sh file</a>
 					</li>
 					<li>
-						<a data-ng-click="generateZip(netkit, labInfo)" onclick="toggle_submenu(-1)">Download .zip
+						<a data-ng-click="labReady() && generateZip(netkit, labInfo)" onclick="toggle_submenu(-1)">Download .zip
 							file</a>
 					</li>
 				</ul>
@@ -115,6 +139,7 @@
 			<div id="home" class="tab-pane active">
 				<link rel="stylesheet" href="src/style/nlg-home.css" />
 				<script src="src/lab-generator/bgp-policy.js"></script>
+				<script src="src/lab-generator/lint.js"></script>
 				<script src="src/lab-generator/models/model.js"></script>
 				<script src="src/lab-generator/make.js"></script>
 
