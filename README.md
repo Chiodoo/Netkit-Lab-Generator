@@ -7,6 +7,7 @@ It works as stand-alone HTML file or using Electron for some advanced capabiliti
 
 Simply fill the form and download the bash script or the .zip file with the whole lab. 
 It is also possible to export and import the form configuration for future changes.
+"Check Lab" lists the problems of the lab before you download it (typos in addresses, interfaces not declared, neighbors that do not exist, ...) and "Copy Script" copies the bash script to the clipboard. Run `node tests/lab-lint-check.js` to test the checks.
 
 Now supports network topology preview (requires a modern browser or the Electrum release).
 

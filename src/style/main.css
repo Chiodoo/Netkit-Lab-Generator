@@ -220,3 +220,56 @@ button {
 	border-color: #808080;
 	opacity: 0.2 !important;
 }
+/* ------------------------------------------------------ */
+/* ---------------------- CHECK LAB ---------------------- */
+/* ------------------------------------------------------ */
+
+.navbar-kathara .badge {
+	margin-left: 2px;
+	color: white;
+}
+
+.check-badge-error {
+	background-color: #d9534f;
+}
+
+.check-badge-warning {
+	background-color: #f0ad4e;
+}
+
+#check-panel {
+	position: fixed;
+	top: 48px;
+	left: 0;
+	right: 0;
+	z-index: 9995;
+	max-height: 40%;
+	overflow-y: auto;
+	padding: 10px 20px;
+	background-color: white;
+	border-bottom: 2px solid var(--main-color);
+	box-shadow: 0 2px 6px rgba(0, 0, 0, .3);
+}
+
+/* the global .ng-scope { height: 100% } would make every line as tall as the panel */
+#check-panel .ng-scope {
+	height: auto;
+}
+
+#check-panel ul {
+	margin: 0;
+	padding-left: 20px;
+}
+
+#check-panel .check-error a {
+	color: #c9302c;
+}
+
+#check-panel .check-warning a {
+	color: #b06d0f;
+}
+
+#check-panel .check-ok {
+	color: #3c763d;
+	margin: 0;
+}

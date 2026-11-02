@@ -8,7 +8,7 @@ app.config(["$compileProvider",
 	}
 ]);
 
-app.controller("nc", function ($location, $anchorScroll, $scope) {
+app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 
 	$scope.app = "include/app.html";
 	$scope.labInfo = JSON.clone(labInfo);
@@ -165,10 +165,50 @@ app.controller("nc", function ($location, $anchorScroll, $scope) {
 	$scope.ROUTE_MAP_SETS = ROUTE_MAP_SETS;
 	$scope.DIRECTIONS = ["in", "out"];
 
-	// networks and neighbor IPs offered by the <datalist>s, recomputed only when the lab changes
+	// networks and neighbor IPs offered by the <datalist>s and lab problems, recomputed only when the lab changes
 	$scope.$watch("netkit", function (netkit) {
 		$scope.suggest = labSuggestions(netkit);
+		$scope.issues = lintLab(netkit);
+		$scope.lintErrors = $scope.issues.filter(i => i.level == "error").length;
+		$scope.lintWarnings = $scope.issues.length - $scope.lintErrors;
 	}, true);
+
+	/* ---------- Check Lab (logic in lint.js) ---------- */
+
+	$scope.goToIssue = function (issue) {
+		$scope.showCheck = false;
+		if (issue.machine < 0) return;
+		toggle_tab("home");
+		$location.hash($scope.netkit[issue.machine]._uid);
+		$anchorScroll();
+	};
+
+	// before downloading or copying the lab
+	$scope.labReady = function () {
+		return !$scope.lintErrors || confirm("Check Lab found " + $scope.lintErrors + " error(s) in the lab. Continue anyway?");
+	};
+
+	$scope.copyScript = function () {
+		if (!$scope.labReady()) return;
+		let text = $scope.generateScript($scope.netkit, $scope.labInfo);
+		let flash = function (msg) {
+			$scope.copied = msg;
+			$timeout(() => $scope.copied = "", 1500);
+		};
+		// the clipboard API needs a secure context (https, localhost, file:// in most browsers)
+		let fallback = function () {
+			let area = document.createElement("textarea");
+			area.value = text;
+			document.body.appendChild(area);
+			area.select();
+			let ok = document.execCommand("copy");
+			document.body.removeChild(area);
+			flash(ok ? "Copied!" : "Copy failed");
+		};
+		if (navigator.clipboard && window.isSecureContext)
+			navigator.clipboard.writeText(text).then(() => $timeout(() => flash("Copied!")), () => $timeout(fallback));
+		else fallback();
+	};
 
 	$scope.policiesOfType = function (machine, type) {
 		return machine.routing.bgp.policies.filter(p => p.type == type);
