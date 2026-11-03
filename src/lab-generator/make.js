@@ -100,11 +100,10 @@ function makeRouter(netkit, lab){
 function makeRouterFrr(machine, lab) {
 	// routing dinamico RIP e OSPF
 		if (machine.name && machine.name != "" && machine.type == "router") {
-			if (machine.routing.rip.en || machine.routing.ospf.en || machine.routing.bgp.en) {
-				lab.file[machine.name + ".startup"] += "systemctl start frr\n";
-				lab.folders.push(machine.name + "/etc/frr");
-				lab.file[machine.name + "/etc/frr/daemons"] = "zebra=yes\n";
-			}
+			// always: a router with only static routes (ip route in the free text) still needs frr running
+			lab.file[machine.name + ".startup"] += "systemctl start frr\n";
+			lab.folders.push(machine.name + "/etc/frr");
+			lab.file[machine.name + "/etc/frr/daemons"] = "zebra=yes\n";
 			//inizializziamo il file frr.conf
 			lab.file[machine.name+"/etc/frr/frr.conf"]="";
 			//creiamo il file di vtysh
