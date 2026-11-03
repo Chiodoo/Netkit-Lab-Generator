@@ -833,7 +833,18 @@
 				<script src="src/static/vendor/js/vis.js"></script>
 				<script src="src/lab-generator/models/draw.js"></script>
 				<script src="src/lab-generator/make_draw_model.js"></script>
-				<div id="mynetwork" style="height: calc(100% - 280px); border: 1px solid lightgray;"></div>
+				<div style="margin-bottom: 6px;">
+					<label class="btn btn-default" style="margin: 0;">
+						<input type="checkbox" id="fixedLayout" onclick="setNetworkOptions()"> Fixed layout
+					</label>
+					<div class="btn-group" style="margin-left: 6px;">
+						<button type="button" class="btn btn-default" title="Zoom in" onclick="zoomNetwork(1.25)">+</button>
+						<button type="button" class="btn btn-default" title="Zoom out" onclick="zoomNetwork(0.8)">&minus;</button>
+						<button type="button" class="btn btn-default" title="Show the whole lab" onclick="network.fit()">Fit</button>
+					</div>
+					<span class="text-muted">&nbsp;Fixed layout: drag a node and its labels follow it and stay put. Mouse wheel zooms, drag the background to pan.</span>
+				</div>
+				<div id="mynetwork" style="height: calc(100% - 320px); border: 1px solid lightgray;"></div>
 
 				<div id="controls"
 					style="border: 1px solid lightgray; width: 100%; margin-top: 1em; height: 244px;">
@@ -867,14 +878,6 @@
 						</div>
 						<div class="col-md-3">
 							<h3 class="margin-bottom: 5px;">Physics</h3>
-
-							<div class="form-group">
-								<input class="form-check-input" type="checkbox" value="" id="physicsEnabled"
-									onclick="setNetworkOptions()">
-								<label class="form-check-label" for="physicsEnabled">
-									Enabled
-								</label>
-							</div>
 
 							<div class="form-group">
 								<label for='physicsGravitationalConstant'>&nbsp;Gravitational Constant:</label>
@@ -914,7 +917,7 @@
 						<div class="col-md-offset-3 col-md-6">
 							<div class="form-group">
 								<button class="btn btn-danger btn-block"
-									data-ng-click="makeGraph(netkit)">Reset</button>
+									data-ng-click="makeGraph(netkit, true)">Reset</button>
 							</div>
 						</div>
 					</div>

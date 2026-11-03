@@ -283,8 +283,8 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 		return makeZip(makeFilesStructure(netkitData, labInfoData));
 	};
 
-	$scope.makeGraph = function (netkitData) {
-		return makeGraph(netkitData);
+	$scope.makeGraph = function (netkitData, reset) {
+		return makeGraph(netkitData, reset);
 	};
 
 	$scope.makeGraphIfChanged = function (netkitData) {

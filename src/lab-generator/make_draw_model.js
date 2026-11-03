@@ -259,7 +259,17 @@ function generate_nodes_edges(lab) {
 	return { nodes, edges };
 }
 
-function makeGraph(netkit) {
-	var graph = generate_nodes_edges(netkit);
-	draw(graph.nodes, graph.edges);
+// Keeps the current positions of nodes that still exist, unless reset
+function makeGraph(netkit, reset) {
+	let graph = generate_nodes_edges(netkit);
+	let keep = !reset && typeof network == "object";
+	if (keep) {
+		let pos = network.getPositions();
+		for (let node of graph.nodes) {
+			if (!pos[node.id]) continue;
+			node.x = pos[node.id].x;
+			node.y = pos[node.id].y;
+		}
+	}
+	draw(graph.nodes, graph.edges, keep);
 }

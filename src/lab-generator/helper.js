@@ -120,10 +120,14 @@ function _executeGeneric(e, command) {
 	electron.ipcRenderer.send("script:" + command);
 }
 
+function zoomNetwork(factor) {
+  network.moveTo({ scale: network.getScale() * factor, animation: { duration: 200 } });
+}
+
 function setNetworkOptions() {
   let smoothEnabled = document.getElementById("smoothEnabled");
   let smoothType = document.getElementById("smoothType");
-  let physicsEnabled = document.getElementById("physicsEnabled");
+  let fixedLayout = document.getElementById("fixedLayout");
   let physicsGConstant = document.getElementById("physicsGravitationalConstant");
   document.getElementById("physicsGravitationalConstantValue").value = parseInt(physicsGConstant.value);
 
@@ -133,7 +137,8 @@ function setNetworkOptions() {
   if (smoothEnabled.checked) {
     edges = {
       smooth: {
-        type: smoothType.value
+        // dynamic curves are driven by physics and would lag behind in a fixed layout
+        type: (fixedLayout.checked && smoothType.value == "dynamic") ? "continuous" : smoothType.value
       }
     }
   } else {
@@ -142,7 +147,7 @@ function setNetworkOptions() {
     }
   }
 
-  if (physicsEnabled.checked) {
+  if (!fixedLayout.checked) {
     physics = {
       enabled: true,
       barnesHut: {
