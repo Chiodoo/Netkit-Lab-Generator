@@ -308,4 +308,46 @@ function makeGraph(netkit, reset, bgpAs) {
 		}
 	}
 	draw(graph.nodes, graph.edges, keep);
+	network.on("click", params => { if (bgpGraphClick) bgpGraphClick(params); });
+	if (bgpSimGraph) bgpHighlight(bgpSimGraph);
+}
+
+/* ---------------- BGP Mode (bgp-sim.js) ---------------- */
+// the path and the propagation are extra edges drawn over the graph (ids bgpsim-*), removed at every change
+
+var bgpSimGraph = null;	// last thing shown, drawn again when the graph is rebuilt
+var bgpGraphClick = null;	// set by the controller: click on a node while BGP Mode is on
+
+// g: { path: [{ from, to, domain, label }], nodes: [names], overlay: [{ from, to, status, title }] } or null
+function bgpHighlight(g) {
+	bgpSimGraph = g;
+	if (typeof network != "object" || !network.body) return;
+	let edges = network.body.data.edges, nodes = network.body.data.nodes;
+	edges.remove(edges.getIds({ filter: e => /^bgpsim-/.test(e.id) }));
+	network.unselectAll();
+	if (!g) return;
+	let add = {}, has = id => !!nodes.get(id);
+	let edge = function (id, e) {
+		if (!has(e.from) || !has(e.to)) return;
+		if (add[id]) add[id].width = Math.min(add[id].width + 1, 12);
+		else add[id] = Object.assign({ id: id, physics: false, smooth: false, width: 5 }, e);
+	};
+	for (let h of g.path) {
+		let a = "machine-" + h.from, b = "machine-" + h.to, d = "domain-" + h.domain;
+		let style = { color: { color: RED, highlight: RED }, arrows: "to", font: { color: RED, strokeWidth: 4, size: 22 } };
+		if (h.domain && has(d)) {
+			edge("bgpsim-p-" + h.from + "-" + h.domain, Object.assign({ from: a, to: d, label: h.label || undefined }, style));
+			edge("bgpsim-p-" + h.domain + "-" + h.to, Object.assign({ from: d, to: b }, style));
+		} else edge("bgpsim-p-" + h.from + "-" + h.to, Object.assign({ from: a, to: b, label: h.label || undefined }, style));
+	}
+	let colors = { best: GREEN, accepted: "#e69500", blocked: RED, down: GRAY };
+	for (let o of g.overlay) {
+		edge("bgpsim-o-" + o.from + "-" + o.to, {
+			from: "machine-" + o.from, to: "machine-" + o.to, arrows: "to", title: o.status + ": " + o.title, width: 3,
+			dashes: o.status == "blocked" || o.status == "down", color: { color: colors[o.status], highlight: colors[o.status] },
+			smooth: { type: "curvedCW", roundness: 0.25 }
+		});
+	}
+	edges.add(Object.keys(add).map(k => add[k]));
+	network.selectNodes(g.nodes.map(n => "machine-" + n).filter(has), false);
 }

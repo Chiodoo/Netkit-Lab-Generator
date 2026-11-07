@@ -273,3 +273,44 @@ button {
 	color: #3c763d;
 	margin: 0;
 }
+
+/* BGP Mode panel in the Topology tab */
+.bgp-sim {
+	width: 45%;
+	overflow: auto;
+	padding: 6px 10px;
+	border: 1px solid lightgray;
+	border-left: none;
+	font-size: 12px;
+}
+
+/* the global .ng-scope { height: 100% } would make every row as tall as the panel */
+.bgp-sim .ng-scope {
+	height: auto;
+}
+
+.bgp-sim.ng-scope {
+	height: 100%;
+}
+
+.bgp-sim-dest {
+	margin: 4px 0 8px;
+}
+
+.bgp-sim label {
+	margin-right: 1em;
+}
+
+.bgp-sim .table {
+	margin-bottom: 8px;
+}
+
+.bgp-sim .bgp-table td {
+	font-family: monospace;
+	white-space: nowrap;
+}
+
+.bgp-sim .bgp-table td:last-child {
+	font-family: inherit;
+	white-space: normal;
+}
