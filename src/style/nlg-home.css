@@ -227,7 +227,8 @@ span.btn {
 }
 
 /* main.css gives every .ng-scope height: 100%, in table cells firefox resolves it and the cells stop growing */
-.bgp-policies .ng-scope {
+.bgp-policies .ng-scope,
+#as-relations .ng-scope {
 	height: auto;
 }
 
@@ -284,6 +285,46 @@ span.btn {
 .policy-warning {
 	color: #8a6d3b;
 	margin: 0;
+}
+
+.policy-auto {
+	display: block;
+	color: #3c763d;
+}
+
+.bgp-policies .auto-policies {
+	border-left: 3px solid #f0ad4e;
+	padding-left: 10px;
+	margin-top: 1.5em;
+}
+
+.auto-preview {
+	white-space: pre;
+	max-height: 25em;
+	overflow: auto;
+}
+
+/* ------ AS RELATIONSHIPS ------ */
+
+#as-relations {
+	margin-top: 2em;
+	width: 100%;
+}
+
+#as-relations td {
+	vertical-align: top;
+}
+
+#as-relations .form-inline .form-control {
+	margin: 2px 0;
+}
+
+#as-relations .as-label {
+	min-width: 5em;
+}
+
+#as-relations .policy-number {
+	width: 6em;
 }
 
 /* ------ BASH ------ */

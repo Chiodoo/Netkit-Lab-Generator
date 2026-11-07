@@ -165,10 +165,17 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.ROUTE_MAP_SETS = ROUTE_MAP_SETS;
 	$scope.DIRECTIONS = ["in", "out"];
 
-	// networks and neighbor IPs offered by the <datalist>s and lab problems, recomputed only when the lab changes
-	$scope.$watch("netkit", function (netkit) {
+	// networks and neighbor IPs offered by the <datalist>s, auto-generated policies and lab problems,
+	// recomputed only when the lab or the AS relationships change
+	$scope.$watch(() => [$scope.netkit, $scope.labInfo.bgpAs], function () {
+		let netkit = $scope.netkit, bgpAs = $scope.labInfo.bgpAs;
 		$scope.suggest = labSuggestions(netkit);
-		$scope.issues = lintLab(netkit);
+		$scope.asView = bgpAsView(netkit, bgpAs);
+		$scope.auto = netkit.map(m => m.type == "router" && m.routing.bgp.en ? autoSessions(m, bgpAs) : []);
+		$scope.auto.forEach((list, i) => list.forEach(s => s.explain = autoExplain(netkit[i], s)));
+		$scope.autoPreview = netkit.map((m, i) => $scope.auto[i].length ? autoPreview(m, $scope.auto[i]) : "");
+		$scope.issues = lintLab(netkit, bgpAs);
+		$scope.asIssueList = bgpAsIssues(netkit, bgpAs);	// with the quiet ones, hidden in Check Lab
 		$scope.lintErrors = $scope.issues.filter(i => i.level == "error").length;
 		$scope.lintWarnings = $scope.issues.length - $scope.lintErrors;
 	}, true);
@@ -208,6 +215,55 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 		if (navigator.clipboard && window.isSecureContext)
 			navigator.clipboard.writeText(text).then(() => $timeout(() => flash("Copied!")), () => $timeout(fallback));
 		else fallback();
+	};
+
+	/* ---------- AS relationships and policy models (logic in bgp-as.js) ---------- */
+
+	$scope.AS_MODELS = AS_MODELS;
+	$scope.AS_ROLES = AS_ROLES;
+	$scope.LINK_PREFS = LINK_PREFS;
+
+	$scope.setRole = function (x, n) {
+		setAsRole($scope.labInfo.bgpAs, x, n.asn, n.role);
+		changed = true;
+	};
+
+	$scope.addRelation = function (x, form) {
+		form.error = addAsRelationError($scope.labInfo.bgpAs, x, form.asn, form.role);
+		if (form.error) return;
+		setAsRole($scope.labInfo.bgpAs, x, asn(form.asn), form.role);
+		form.asn = form.role = "";
+		changed = true;
+	};
+
+	$scope.asIssues = x => ($scope.asIssueList || []).filter(i => i.as == x && !/auto-generated route-map/.test(i.text));
+	$scope.isEbgp = (machine, remote) => remote.neighbor && validAsn(remote.as) && validAsn(machine.routing.bgp.as) && asn(remote.as) != asn(machine.routing.bgp.as);
+	$scope.usesModel = x => ["pc", "both"].indexOf($scope.labInfo.bgpAs.ases[x] && $scope.labInfo.bgpAs.ases[x].model) >= 0;
+	$scope.detached = x => [].concat(...$scope.auto.map((list, i) => list.filter(s => s.state == "edited" && asn($scope.netkit[i].routing.bgp.as) == x)
+		.map(s => ($scope.netkit[i].name || "machine " + $scope.netkit[i].row) + " neighbor " + s.remote.neighbor + " (AS " + s.y + ") " + s.dir)));
+
+	let setState = (s, state) => s.remote.auto = Object.assign({ in: "", out: "" }, s.remote.auto, { [s.dir]: state });
+	$scope.applyAuto = s => setState(s, "applied");
+	$scope.discardAuto = s => setState(s, "discarded");
+	$scope.restoreAuto = s => setState(s, "");
+	$scope.applyAllAuto = list => list.filter(s => !s.state && !s.conflict).forEach(s => setState(s, "applied"));
+
+	$scope.editAuto = function (machine, s) {
+		if (confirm("Copy " + s.policy.name + (s.uses && s.uses.auto ? " and " + s.uses.name : "") + " into the policies of "
+			+ (machine.name || "this router") + "?\nThe copy is applied to neighbor " + s.remote.neighbor + " " + s.dir
+			+ " and is no longer regenerated when relationships, models or preferences change."))
+			detachAutoSession(machine, s);
+	};
+
+	// one route-map per direction: the manual one goes (deleted too if nothing else uses it), the generated one is applied
+	$scope.replaceManual = function (machine, s) {
+		let bgp = machine.routing.bgp, manual = s.conflict;
+		let alone = policyReferences(bgp, manual).length == 1;
+		if (!confirm("Remove route-map " + manual.name + " from neighbor " + s.remote.neighbor + " " + s.dir
+			+ (alone ? " and delete it (nothing else uses it)" : "") + ", then apply " + s.policy.name + "?")) return;
+		s.remote.apply["route-map"][s.dir] = null;
+		if (alone) bgp.policies.splice(bgp.policies.indexOf(manual), 1);
+		setState(s, "applied");
 	};
 
 	$scope.policiesOfType = function (machine, type) {
@@ -284,13 +340,13 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	};
 
 	$scope.makeGraph = function (netkitData, reset) {
-		return makeGraph(netkitData, reset);
+		return makeGraph(netkitData, reset, $scope.labInfo.bgpAs);
 	};
 
 	$scope.makeGraphIfChanged = function (netkitData) {
 		if (changed) {
 			changed = false;
-			return makeGraph(netkitData);
+			return makeGraph(netkitData, false, $scope.labInfo.bgpAs);
 		}
 	};
 
@@ -322,6 +378,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 						$scope.netkit.forEach(migrateBgpPolicies);
 						$scope.counter = $scope.netkit.length;
 						$scope.labInfo = app[0].labInfo;
+						migrateBgpAs($scope.labInfo);
 						$scope.$apply();
 
 						changed = true;

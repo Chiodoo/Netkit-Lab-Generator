@@ -93,7 +93,7 @@ function containsEdge(from, to, list) {
 // NODES: each machine; each eth of each machine; each collision domain; 
 // each ospf/rip/as is a sticknote, so it's a node too;
 // each ip on collision domain is a white note, so it's another node.
-function generate_nodes_edges(lab) {
+function generate_nodes_edges(lab, bgpAs) {
 	let nodes = [];
 	let edges = [];
 
@@ -234,21 +234,28 @@ function generate_nodes_edges(lab) {
 				group: "eth",
 				value: 2
 			});
-			//eth to domain
+			// the link is a straight line machine-domain, the interface label sits beside it:
+			// the edges through the label only hold it in place (hidden, still springs for the physics)
 			let app_to_eth = "eth-" + id + "-" + if_name + "-" + m;
 			if (!containsEdge(domain_id, app_to_eth, edges)) {
 				edges.push({
 					from: domain_id,
 					to: app_to_eth,
-					length: LENGTH_SERVER, width: WIDTH_SCALE
+					length: LENGTH_SERVER, hidden: true
 				});
 			}
-			// eth to machine
 			if (!containsEdge(id, app_to_eth, edges)) {
 				edges.push({
 					from: id,
 					to: app_to_eth,
-					length: LENGTH_CLOSE, width: WIDTH_SCALE
+					length: LENGTH_SUB, hidden: true
+				});
+			}
+			if (!containsEdge(id, domain_id, edges)) {
+				edges.push({
+					from: id,
+					to: domain_id,
+					width: WIDTH_SCALE, physics: false
 				});
 			}
 		}
@@ -256,12 +263,41 @@ function generate_nodes_edges(lab) {
 
 	pendingDomainNodes.forEach(domainNode => { if(!containsNodeWithID(domainNode.id, nodes)) nodes.push(domainNode);});
 
+	relationEdges(lab, bgpAs, edges);
 	return { nodes, edges };
 }
 
+// AS relationships as in the slides: customer -> provider arrow, peer-peer dashed, between the routers of each eBGP session
+function relationEdges(lab, bgpAs, edges) {
+	if (!bgpAs || !document.getElementById("showRelations").checked) return;
+	let routerOf = {};
+	for (let m of lab) {
+		for (let i of m.interfaces.if) if (m.type == "router" && i.ip) routerOf[i.ip.split("/")[0]] = m;
+	}
+	let seen = {};
+	for (let m of lab) {
+		let bgp = m.type == "router" && m.name && m.routing.bgp;
+		if (!bgp || !bgp.en || !validAsn(bgp.as)) continue;
+		for (let r of bgp.remote || []) {
+			let o = r && routerOf[r.neighbor];
+			if (!o || !o.name || !validAsn(r.as) || asn(r.as) == asn(bgp.as)) continue;
+			let role = asRole(bgpAs, asn(bgp.as), asn(r.as));
+			let pair = [m.name, o.name].sort().join(" ");
+			if (!role || seen[pair]) continue;
+			seen[pair] = true;
+			edges.push({
+				from: "machine-" + (role == "customer" ? o.name : m.name), to: "machine-" + (role == "customer" ? m.name : o.name),
+				// curved, so they do not hide the links they run along
+				arrows: role == "peer" ? "" : "to", dashes: role == "peer", physics: false, smooth: { type: "curvedCW", roundness: 0.3 },
+				color: { color: role == "peer" ? GRAY : BLUE }, width: 2, title: role == "peer" ? "peer-peer" : "customer -> provider"
+			});
+		}
+	}
+}
+
 // Keeps the current positions of nodes that still exist, unless reset
-function makeGraph(netkit, reset) {
-	let graph = generate_nodes_edges(netkit);
+function makeGraph(netkit, reset, bgpAs) {
+	let graph = generate_nodes_edges(netkit, bgpAs);
 	let keep = !reset && typeof network == "object";
 	if (keep) {
 		let pos = network.getPositions();

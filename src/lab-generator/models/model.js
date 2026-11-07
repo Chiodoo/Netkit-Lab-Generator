@@ -3,7 +3,8 @@ var labInfo = {
 	version: "",
 	author: "",
 	email: "",
-	web: ""
+	web: "",
+	bgpAs: { relations: [], ases: {} }	// AS relationships and policy models, see bgp-as.js
 };
 
 var backbone = {
@@ -82,7 +83,9 @@ var backbone = {
 				as: "",
 				description: "",
 				defaultOriginate: false,
-				apply: emptyApply()	// apply[cmd][in|out] = id of a policy
+				apply: emptyApply(),	// apply[cmd][in|out] = id of a policy
+				pref: defaultLinkPref(),	// primary/backup of the eBGP session, see bgp-as.js
+				auto: { in: "", out: "" }	// generated route-map: "" proposed, applied, discarded, edited
 			}],
 			policies: [],	// { id, type, name, rules: [] }, see bgp-policy.js
 			free: ""

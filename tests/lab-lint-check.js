@@ -4,7 +4,7 @@ const fs = require("fs"), vm = require("vm"), assert = require("assert"), path =
 const root = path.join(__dirname, "..");
 const ctx = { console };
 vm.createContext(ctx);
-for (const f of ["bgp-policy.js", "models/model.js", "lint.js"])
+for (const f of ["bgp-policy.js", "bgp-as.js", "models/model.js", "lint.js"])
 	vm.runInContext(fs.readFileSync(path.join(root, "src/lab-generator", f), "utf8"), ctx, { filename: f });
 
 function load() {

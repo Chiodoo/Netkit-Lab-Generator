@@ -131,34 +131,21 @@ function setNetworkOptions() {
   let physicsGConstant = document.getElementById("physicsGravitationalConstant");
   document.getElementById("physicsGravitationalConstantValue").value = parseInt(physicsGConstant.value);
 
-  let edges = {}
-  let physics = {}
-
-  if (smoothEnabled.checked) {
-    edges = {
-      smooth: {
-        // dynamic curves are driven by physics and would lag behind in a fixed layout
-        type: (fixedLayout.checked && smoothType.value == "dynamic") ? "continuous" : smoothType.value
-      }
-    }
-  } else {
-    edges = {
-      smooth: false
-    }
+  let edges = {
+    smooth: smoothEnabled.checked && smoothType.value != "straight" ? { type: smoothType.value } : false
   }
 
-  if (!fixedLayout.checked) {
-    physics = {
-      enabled: true,
-      barnesHut: {
-        gravitationalConstant: parseInt(physicsGConstant.value)
-      }
-    }
-  } else {
-    physics = {
-      enabled: false
+  // fixed layout: no physics, the machines stay where they are dropped and the rest is placed around them
+  let physics = fixedLayout.checked ? { enabled: false } : {
+    enabled: true,
+    barnesHut: {
+      gravitationalConstant: parseInt(physicsGConstant.value)
     }
   }
 
   network.setOptions({edges, physics})
+  // machines fixed by draw() while physics placed the new ones
+  let nodes = network.body.data.nodes;
+  nodes.update(nodes.getIds({ filter: n => isMachine(n.id) }).map(id => ({ id: id, fixed: false })));
+  if (fixedLayout.checked) applyLayout();
 }

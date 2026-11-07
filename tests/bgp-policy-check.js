@@ -4,7 +4,7 @@ const fs = require("fs"), vm = require("vm"), assert = require("assert"), path =
 const root = path.join(__dirname, "..");
 const ctx = { console, window: {}, document: { getElementById: () => ({ classList: { add() {}, remove() {} } }) } };
 vm.createContext(ctx);
-for (const f of ["helper.js", "bgp-policy.js", "models/model.js", "make.js"])
+for (const f of ["helper.js", "bgp-policy.js", "bgp-as.js", "models/model.js", "make.js"])
 	vm.runInContext(fs.readFileSync(path.join(root, "src/lab-generator", f), "utf8"), ctx, { filename: f });
 
 function loadConfig(file) {	// same parsing and migration as the "Import configuration" menu
