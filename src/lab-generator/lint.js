@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------- */
 /* --------------------------- LAB CHECK -------------------------- */
 /* typos, values the generator skips silently and configurations    */
-/* that cannot work. Uses parseIp/parseCidr from bgp-policy.js      */
+/* that cannot work. Uses bgp-policy.js and bgp-as.js              */
 /* ---------------------------------------------------------------- */
 
 function maskOf(len) {
@@ -44,7 +44,8 @@ function startupAddresses(m) {
 }
 
 // [{ level: "error" | "warning", machine: index in netkit or -1, text }], errors first
-function lintLab(netkit) {
+// bgpAs (labInfo.bgpAs, optional): AS relationships and policy models, checked by bgp-as.js
+function lintLab(netkit, bgpAs) {
 	let issues = [];
 	let add = (level, idx, text) => issues.push({ level: level, machine: idx, text: text });
 	let name = m => m.name || "machine " + m.row;
@@ -231,7 +232,7 @@ function lintLab(netkit) {
 		if (!isUint(bgp.as, MAX_UINT32) || +bgp.as < 1) add("error", idx, n + ": the AS number is missing or not a number");
 		lintNetworks(m, idx, "bgp", bgp.network);
 
-		let neighbors = {};
+		let neighbors = {}, eff = effectiveBgp(m, bgpAs);	// with the applied auto-generated route-maps
 		for (let remote of bgp.remote) {
 			if (!remote || (!remote.neighbor && !remote.as)) continue;
 			let ip = remote.neighbor, what = n + " neighbor " + ip;
@@ -279,7 +280,8 @@ function lintLab(netkit) {
 			if (ebgp && !towards.length && free.indexOf("ebgp-multihop") < 0)
 				add("warning", idx, what + " (" + where(o) + ") does not share a collision domain with " + n + ": an eBGP session needs ebgp-multihop");
 			if (ebgp && frr && !bgp.noEbgpRequiresPolicy && free.indexOf("no bgp ebgp-requires-policy") < 0) {
-				let missing = ["in", "out"].filter(dir => !NEIGHBOR_POLICY_CMDS.some(c => remote.apply && findPolicy(bgp.policies, remote.apply[c.cmd] && remote.apply[c.cmd][dir], c.type))
+				let applied = eff.remote[bgp.remote.indexOf(remote)].apply;
+				let missing = ["in", "out"].filter(dir => !NEIGHBOR_POLICY_CMDS.some(c => applied && findPolicy(eff.policies, applied[c.cmd] && applied[c.cmd][dir], c.type))
 					&& !new RegExp("neighbor " + ip.replace(/\./g, "\\.") + " (route-map|prefix-list|distribute-list|filter-list) \\S+ " + dir).test(free));
 				if (missing.length)
 					add("warning", idx, what + ": eBGP without " + missing.join("/") + " policy, FRR (ebgp-requires-policy) "
@@ -301,5 +303,6 @@ function lintLab(netkit) {
 		}
 	}
 
+	issues = issues.concat(bgpAsIssues(netkit, bgpAs).filter(i => !i.quiet));
 	return issues.filter(i => i.level == "error").concat(issues.filter(i => i.level == "warning"));
 }

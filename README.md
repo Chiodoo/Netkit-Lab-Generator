@@ -14,6 +14,7 @@ Now supports network topology preview (requires a modern browser or the Electrum
 * [Demo](https://www.kathara.org/tools/nlg/) **(may not always be up to date)**
 * [Example configuration](https://raw.githubusercontent.com/Kidel/Netkit-Lab-Generator/master/examples/example_lab.config) (can be imported to generate the files or the graph)
 * [BGP policies example](examples/example_bgp_policies.config): prefix-lists (with ge/le), access-lists, as-path access-lists and route-maps applied to the neighbors (import it with "Save & Load" > "Import configuration"). Run `node tests/bgp-policy-check.js` to check the generated configuration.
+* [AS relationships example](examples/example_bgp_relationships.config): six ASes (AS1, AS2, AS10, AS20, AS100, AS200) with customer/peer/provider relationships and the policy model "Both" (customer-provider export filter + prefer-customer local-preference). The route-maps generated from the relationships, the models and the primary/backup preference of each eBGP session are proposed in the BGP policies of each router, to be applied, edited or discarded. Run `node tests/bgp-as-check.js` to check them.
 * [Screenshot (form)](https://raw.githubusercontent.com/Kidel/Netkit-Lab-Generator/master/images/screencapture-201801261.png)
 * [Screenshot (graph)](https://raw.githubusercontent.com/Kidel/Netkit-Lab-Generator/master/images/screencapture-201801143.png)
 

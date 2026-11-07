@@ -80,14 +80,14 @@ function makeTerminal(netkit, lab) {
 /*-----------------------------------------*/
 
 
-function makeRouter(netkit, lab){
+function makeRouter(netkit, lab, bgpAs){
 	for(let machine of netkit){
 		if(machine.name && machine.name != "" && machine.type=="router"){
 			if(machine.routingSoftware == "frr"){
-				makeRouterFrr(machine, lab);
+				makeRouterFrr(machine, lab, bgpAs);
 			}
 			if(machine.routingSoftware == "quagga"){
-				makeRouterQuagga(machine, lab);
+				makeRouterQuagga(machine, lab, bgpAs);
 			}
 		}
 	}
@@ -97,7 +97,7 @@ function makeRouter(netkit, lab){
 /* ------------------------ FRR ---------------------- */
 /* --------------------------------------------------- */
 
-function makeRouterFrr(machine, lab) {
+function makeRouterFrr(machine, lab, bgpAs) {
 	// routing dinamico RIP e OSPF
 		if (machine.name && machine.name != "" && machine.type == "router") {
 			// always: a router with only static routes (ip route in the free text) still needs frr running
@@ -117,7 +117,7 @@ function makeRouterFrr(machine, lab) {
 			}
 
 			if (machine.routing.bgp.en) 
-				makeBgpConfFrr(machine, lab);
+				makeBgpConfFrr(machine, lab, bgpAs);
 
 			//nb: i costi vanno qui alla fine
 			if (machine.routing.ospf.en) {
@@ -194,7 +194,7 @@ function makeRouterOspfFrr(machine, lab){
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 
-function makeBgpConfFrr(router, lab) {
+function makeBgpConfFrr(router, lab, bgpAs) {
 	lab.file[router.name + "/etc/frr/daemons"] += "bgpd=yes\n";
 	
 	lab.file[router.name + "/etc/frr/frr.conf"] += "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n\n";
@@ -224,22 +224,23 @@ function makeBgpConfFrr(router, lab) {
 		}
 	});
 
-	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
-	lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+	//Policy dei neighbor (manuali + generate dai modelli e applicate): dopo tutti i remote-as, altrimenti vengono ignorate
+	let bgp = effectiveBgp(router, bgpAs);
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborPolicyLines(bgp);
 
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/frr/frr.conf"] += router.routing.bgp.free + "\n";
 
 	//Definizione delle policy: fuori dal blocco router bgp
-	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(router.routing.bgp, "frr") + "\n";
+	lab.file[router.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions(bgp, "frr") + "\n";
 }
 
 /* ------------------------------------------------------ */
 /* ------------------------ QUAGGA ---------------------- */
 /* ------------------------------------------------------ */
 
-function makeRouterQuagga(machine, lab) {
+function makeRouterQuagga(machine, lab, bgpAs) {
 	// routing dinamico RIP e OSPF
 		if (machine.name && machine.name != "" && machine.type == "router") {
 			if (machine.routing.rip.en || machine.routing.ospf.en || machine.routing.bgp.en) {
@@ -289,7 +290,7 @@ function makeRouterQuagga(machine, lab) {
 				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\n";
 			}
 
-			if (machine.routing.bgp.en) makeBgpConfQuagga(machine, lab);
+			if (machine.routing.bgp.en) makeBgpConfQuagga(machine, lab, bgpAs);
 
 			//nb: mantenere l'ordine
 			if (machine.routing.rip.en && machine.routing.rip.connected) {
@@ -340,7 +341,7 @@ function makeRouterQuagga(machine, lab) {
 		}
 }
 
-function makeBgpConfQuagga(router, lab) {
+function makeBgpConfQuagga(router, lab, bgpAs) {
 	lab.file[router.name + "/etc/zebra/daemons"] += "bgpd=yes\n";
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] = ""
@@ -373,15 +374,16 @@ function makeBgpConfQuagga(router, lab) {
 		}
 	});
 
-	//Policy dei neighbor: dopo tutti i remote-as, altrimenti vengono ignorate
-	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborPolicyLines(router.routing.bgp);
+	//Policy dei neighbor (manuali + generate dai modelli e applicate): dopo tutti i remote-as, altrimenti vengono ignorate
+	let bgp = effectiveBgp(router, bgpAs);
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborPolicyLines(bgp);
 
 	//Free conf
 	if (router.routing.bgp.free && router.routing.bgp.free != "")
 		lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\n" + router.routing.bgp.free + "\n";
 
 	//Definizione delle policy: fuori dal blocco router bgp
-	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpPolicyDefinitions(router.routing.bgp, "quagga");
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpPolicyDefinitions(bgp, "quagga");
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\nlog file /var/log/zebra/bgpd.log\n\n"
 		+ "debug bgp\ndebug bgp events\ndebug bgp filters\ndebug bgp fsm\ndebug bgp keepalives\ndebug bgp updates\n";
@@ -655,7 +657,7 @@ function makeFilesStructure(netkit, labInfo) {
 	makeStartupFiles(netkit, lab);
 	makeStaticRouting(netkit, lab);
 	makeTerminal(netkit, lab);
-	makeRouter(netkit, lab);
+	makeRouter(netkit, lab, labInfo && labInfo.bgpAs);
 	makeWebserver(netkit, lab);
 	makeNameserver(netkit, lab);
 	makeOther(netkit, lab);
@@ -663,7 +665,7 @@ function makeFilesStructure(netkit, labInfo) {
 	makeRyuController(netkit, lab);
 
 	if (labInfo.toggle == "disable")
-		makeGraph(netkit);
+		makeGraph(netkit, false, labInfo.bgpAs);
 
 	return lab;
 }

@@ -47,6 +47,8 @@ function migrateBgpPolicies(machine) {
 	if (!Array.isArray(bgp.policies)) bgp.policies = [];
 	for (let remote of bgp.remote || []) {
 		if (remote && !remote.apply) remote.apply = emptyApply();
+		if (remote && !remote.pref) remote.pref = defaultLinkPref();
+		if (remote && !remote.auto) remote.auto = { in: "", out: "" };
 	}
 }
 
