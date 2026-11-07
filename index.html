@@ -141,6 +141,7 @@
 				<script src="src/lab-generator/bgp-policy.js"></script>
 				<script src="src/lab-generator/bgp-as.js"></script>
 				<script src="src/lab-generator/lint.js"></script>
+				<script src="src/lab-generator/bgp-sim.js"></script>
 				<script src="src/lab-generator/models/model.js"></script>
 				<script src="src/lab-generator/make.js"></script>
 
@@ -1004,9 +1005,150 @@
 						<button type="button" class="btn btn-default" title="Zoom out" onclick="zoomNetwork(0.8)">&minus;</button>
 						<button type="button" class="btn btn-default" title="Show the whole lab" onclick="network.fit()">Fit</button>
 					</div>
+					<label class="btn btn-default" style="margin: 0 0 0 6px;" title="Simulate BGP on the lab configuration and show how traffic moves">
+						<input type="checkbox" data-ng-model="sim.on" data-ng-change="simToggle()"> BGP Mode
+					</label>
 					<span class="text-muted">&nbsp;Fixed layout (on once the graph settles): place the machines, they stay where you drop them; collision domains sit between their machines, interfaces and labels next to them (drag one to shift it). Untick it to let physics move everything, Reset to start over. Mouse wheel zooms, drag the background to pan.</span>
 				</div>
-				<div id="mynetwork" style="height: calc(100% - 320px); border: 1px solid lightgray;"></div>
+				<div style="display: flex; height: calc(100% - 320px);">
+				<div id="mynetwork" style="flex: 1; min-width: 0; height: 100%; border: 1px solid lightgray;"></div>
+
+				<!-- BGP MODE (logic in bgp-sim.js) -->
+				<div class="bgp-sim" data-ng-if="sim.on">
+					<p class="text-muted">{{SIM_NOTE}}</p>
+					<div class="form-inline">
+						<label>Source
+							<select class="form-control input-sm" data-ng-model="sim.source" data-ng-change="simRun()">
+								<option value="">All routers</option>
+								<option data-ng-repeat="n in simRouters" value="{{n}}">{{n}}</option>
+							</select>
+						</label>
+						<label>Destination
+							<input class="form-control input-sm" list="lab-networks" placeholder="IP, prefix or machine name"
+								data-ng-model="sim.dest" data-ng-change="simRun()" data-ng-model-options="{ debounce: 300 }">
+						</label>
+					</div>
+					<!-- a machine name in Destination: its addresses, click one to trace towards it -->
+					<div data-ng-repeat="m in simView.machines" class="bgp-sim-dest">
+						<b>{{m.name}}</b>
+						<div data-ng-repeat="a in m.addrs">
+							<a href="" data-ng-click="simSetDest(a.ip)">{{a.dev}} {{a.cidr}}</a>
+							<span class="text-muted">{{a.domain ? 'collision domain ' + a.domain : 'no collision domain'}}{{a.peers.length ? ', with ' + a.peers.join(', ') : ''}}</span>
+						</div>
+						<div data-ng-if="!m.addrs.length" class="text-muted">no addresses</div>
+					</div>
+					<div class="form-inline">
+						<label title="which sessions the prefix of the destination crosses and where it is blocked (arrows on the graph)">
+							<input type="checkbox" data-ng-model="sim.propagation" data-ng-change="simRun()"> Show announcement propagation
+						</label>
+						<label data-ng-show="sim.source" title="router names (as200r1 as20r1 ...) or AS numbers (200 20 100)">Expected path
+							<input class="form-control input-sm" placeholder="as200r1 as20r1 ... or 200 20 100"
+								data-ng-model="sim.expected" data-ng-change="simRun()" data-ng-model-options="{ debounce: 300 }">
+						</label>
+					</div>
+
+					<p data-ng-if="!simResult.converged" class="text-danger">BGP did not converge: the results show the last round.</p>
+					<p data-ng-if="simView.error" class="text-danger">{{simView.error}}</p>
+
+					<!-- one source: hop by hop -->
+					<div data-ng-if="sim.source" data-ng-repeat="t in simView.traces">
+						<p>
+							<b>{{t.src}} &rarr; {{t.dst}}</b>:
+							<span data-ng-if="t.delivered" class="text-success">delivered to {{t.end}}</span>
+							<span data-ng-if="!t.delivered" class="text-danger">{{t.fail}}</span>
+							<span data-ng-if="t.ases.length"> &middot; ASes crossed: {{t.ases.join(' ')}}</span>
+						</p>
+						<p data-ng-if="t.valley" data-ng-class="t.valley.status == 'invalid' ? 'text-danger' : t.valley.status == 'unknown' ? 'text-muted' : 'text-success'">
+							AS-path {{t.routeAses.join(' ')}}: {{t.valley.text}}</p>
+						<p data-ng-if="t.expected" data-ng-class="t.expected.ok ? 'text-success' : 'text-danger'">Expected path: {{t.expected.text}}</p>
+						<table class="table table-condensed">
+							<tr><th>#</th><th>Router</th><th>AS</th><th>Matched prefix</th><th>Next hop</th><th>AS-path</th><th>LocPrf</th><th>MED</th><th>Why</th></tr>
+							<tr data-ng-repeat="h in t.hops" data-ng-class="{ danger: t.expected && !t.expected.ok && !t.expected.byAs && t.expected.index == $index }"
+								data-ng-click="simSelect(h.m)" title="click: BGP table of {{h.m}}" style="cursor: pointer;">
+								<td>{{$index + 1}}</td><td>{{h.m}}</td><td>{{h.as}}</td><td>{{h.prefix}} <small class="text-muted">{{h.type}}</small></td>
+								<td>{{h.nh}}<span data-ng-if="h.nh != h.via"> via {{h.via}}</span> &rarr; {{h.next}}</td>
+								<td>{{h.path}}</td><td>{{h.lp}}</td><td>{{h.med}}</td><td>{{h.reason}}</td>
+							</tr>
+						</table>
+					</div>
+
+					<!-- all routers: one row each -->
+					<table class="table table-condensed" data-ng-if="!sim.source && simView.traces.length">
+						<tr><th>Source</th><th>Result</th><th>Path</th><th>Valley-free</th></tr>
+						<tr data-ng-repeat="t in simView.traces" data-ng-click="simTraceSource(t.src)" title="click: hop by hop from {{t.src}}" style="cursor: pointer;">
+							<td>{{t.src}}</td>
+							<td data-ng-class="t.delivered ? 'text-success' : 'text-danger'">{{t.delivered ? 'delivered to ' + t.end : t.fail}}</td>
+							<td>{{t.route}}</td>
+							<td data-ng-class="{ 'text-danger': t.valley.status == 'invalid' }">{{t.valley ? t.valley.status : ''}}</td>
+						</tr>
+					</table>
+
+					<!-- no route: where the announcement stops -->
+					<div data-ng-repeat="t in simView.traces" data-ng-if="t.lost">
+						<p><b>Why {{t.end || t.src}} has no route to {{t.dst}}</b></p>
+						<ul>
+							<li data-ng-repeat="l in t.lost">{{l.text}}
+								<ul><li data-ng-repeat="r in l.rows" class="text-danger">{{r.from}} &rarr; {{r.to}}: {{r.reason}}</li></ul>
+							</li>
+						</ul>
+					</div>
+
+					<div data-ng-if="simView.propagation">
+						<p><b>Propagation of {{simView.propagation.key}}</b>
+							<small class="text-muted">(green: best, orange: accepted not best, red: blocked, gray: session down)</small></p>
+						<p data-ng-repeat="o in simView.propagation.origins">{{o.m}}: {{o.text}}</p>
+						<table class="table table-condensed">
+							<tr data-ng-repeat="r in simView.propagation.rows"
+								data-ng-class="{ success: r.status == 'best', warning: r.status == 'accepted', danger: r.status == 'blocked', active: r.status == 'down' }">
+								<td>{{r.from}} &rarr; {{r.to}}</td><td>{{r.status}}</td><td>{{r.reason}}</td>
+							</tr>
+						</table>
+					</div>
+
+					<!-- show ip bgp of the router clicked on the graph or in the hop table -->
+					<div class="form-inline">
+						<label title="also: click a router on the graph or a row of the hop table">show ip bgp on
+							<select class="form-control input-sm" data-ng-model="sim.selected" data-ng-change="simRun()">
+								<option value="">(none)</option>
+								<option data-ng-repeat="n in simBgpRouters" value="{{n}}">{{n}}</option>
+							</select>
+						</label>
+					</div>
+					<div data-ng-if="sim.selected">
+						<p><b>show ip bgp on {{sim.selected}}</b> <a href="" data-ng-click="simSelect('')">close</a>
+							<span data-ng-if="!simTable" class="text-muted"> &middot; it does not run BGP</span></p>
+						<table class="table table-condensed bgp-table" data-ng-if="simTable">
+							<tr><th></th><th>Network</th><th>Next Hop</th><th>Metric</th><th>LocPrf</th><th>Path</th><th>From</th><th>Why</th></tr>
+							<tbody data-ng-repeat="p in simTable">
+								<tr data-ng-repeat="r in p.routes" data-ng-class="{ 'text-muted': r.status == 'rejected' || r.status == 'invalid' }">
+									<td><b>{{r.mark}}</b></td><td>{{$first ? p.prefix : ''}}</td><td>{{r.nh}}</td><td>{{r.med}}</td><td>{{r.lp}}</td>
+									<td>{{r.path}}</td><td>{{r.from}}</td><td>{{r.status != 'best' && r.status != 'valid' ? r.status + ': ' : ''}}{{r.reason}}</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+
+					<details>
+						<summary>Sessions ({{simResult.sessions.length}}, {{simSessionsDown()}} down): mark one down to test the backup</summary>
+						<div data-ng-repeat="s in simResult.sessions">
+							<label data-ng-class="s.up ? '' : 'text-danger'" style="font-weight: normal;">
+								<input type="checkbox" data-ng-model="sim.down.sessions[s.key]" data-ng-change="simRun()" data-ng-disabled="s.staticWhy && !sim.down.sessions[s.key]">
+								{{s.label}}<span data-ng-if="!s.up">: {{s.why}}</span>
+							</label>
+						</div>
+					</details>
+					<details>
+						<summary>Collision domains: mark a link down</summary>
+						<label data-ng-repeat="d in simDomains" style="font-weight: normal; margin-right: 1em;">
+							<input type="checkbox" data-ng-model="sim.down.domains[d]" data-ng-change="simRun()"> {{d}}
+						</label>
+					</details>
+					<details data-ng-if="simResult.warnings.length" open>
+						<summary class="text-warning">Not simulated ({{simResult.warnings.length}})</summary>
+						<ul><li data-ng-repeat="w in simResult.warnings">{{w.text}}</li></ul>
+					</details>
+				</div>
+				</div>
 
 				<div id="controls"
 					style="border: 1px solid lightgray; width: 100%; margin-top: 1em; height: 244px;">

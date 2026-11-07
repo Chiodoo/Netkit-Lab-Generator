@@ -178,6 +178,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 		$scope.asIssueList = bgpAsIssues(netkit, bgpAs);	// with the quiet ones, hidden in Check Lab
 		$scope.lintErrors = $scope.issues.filter(i => i.level == "error").length;
 		$scope.lintWarnings = $scope.issues.length - $scope.lintErrors;
+		if ($scope.sim.on) $scope.simRun();
 	}, true);
 
 	/* ---------- Check Lab (logic in lint.js) ---------- */
@@ -320,6 +321,62 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.neighborPolicyError = neighborPolicyError;
 	$scope.matchListType = match => ROUTE_MAP_MATCHES.find(d => d.match == match).type;
 	$scope.setPlaceholder = set => ROUTE_MAP_SETS.find(d => d.set == set).placeholder;
+
+	/* ---------- BGP Mode in the Topology tab (logic in bgp-sim.js) ---------- */
+
+	// what is marked down lives only here: it is not exported with the configuration
+	$scope.SIM_NOTE = SIM_NOTE;
+	$scope.sim = { on: false, source: "", dest: "", propagation: false, expected: "", selected: "", down: { sessions: {}, domains: {} } };
+
+	$scope.simRun = function () {
+		let s = $scope.sim;
+		if (!s.on) {
+			$scope.simResult = $scope.simView = $scope.simTable = null;
+			bgpHighlight(null);
+			return;
+		}
+		let r = $scope.simResult = bgpSimulate($scope.netkit, $scope.labInfo.bgpAs, { down: s.down });
+		$scope.simRouters = r.machines.filter(M => M.router).map(M => M.name);
+		$scope.simBgpRouters = r.routers.map(M => M.name);
+		$scope.simDomains = [].concat(...r.machines.map(M => M.addrs.map(a => a.domain))).filter((d, i, a) => d && a.indexOf(d) == i).sort();
+		$scope.simView = bgpSimQuery(r, s);
+		$scope.simTable = s.selected && r.byName[s.selected] && r.byName[s.selected].eff ? bgpSimTable(r, s.selected) : null;
+		bgpHighlight($scope.simView.graph);
+	};
+
+	$scope.simToggle = function () {
+		$scope.simRun();
+		// the graph gets narrower or wider
+		$timeout(function () {
+			if (typeof network == "object") {
+				network.setSize();
+				network.fit();
+			}
+		});
+	};
+
+	$scope.simSelect = function (name) {
+		$scope.sim.selected = name;
+		$scope.simRun();
+	};
+
+	$scope.simSetDest = function (ip) {
+		$scope.sim.dest = ip;
+		$scope.simRun();
+	};
+
+	$scope.simTraceSource = function (name) {
+		$scope.sim.source = name;
+		$scope.simRun();
+	};
+
+	$scope.simSessionsDown = () => ($scope.simResult ? $scope.simResult.sessions.filter(s => !s.up).length : 0);
+
+	bgpGraphClick = function (params) {
+		let id = params.nodes[0];
+		if (!$scope.sim.on || !id || !/^machine-/.test(id)) return;
+		$scope.$apply(() => $scope.simSelect(id.slice("machine-".length)));
+	};
 
 	$scope.makeDownload = function (text, filename) {
 		var blob = new Blob([text], { type: "text/plain;charset=utf-8" });

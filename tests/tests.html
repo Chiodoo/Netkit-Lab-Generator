@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8" />
+	<title>BGP simulation tests</title>
+	<style>
+		body { font-family: sans-serif; margin: 2em; }
+		td, th { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+		.pass { color: green; font-weight: bold; }
+		.fail { color: #C5000B; font-weight: bold; }
+		pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
+	</style>
+	<script>if (typeof JSON.clone !== "function") JSON.clone = function (obj) { return JSON.parse(JSON.stringify(obj)) }</script>
+	<script src="../src/lab-generator/helper.js"></script>
+	<script src="../src/lab-generator/bgp-policy.js"></script>
+	<script src="../src/lab-generator/bgp-as.js"></script>
+	<script src="../src/lab-generator/lint.js"></script>
+	<script src="../src/lab-generator/models/model.js"></script>
+	<script src="../src/lab-generator/bgp-sim.js"></script>
+</head>
+
+<body>
+	<h2>BGP simulation (src/lab-generator/bgp-sim.js)</h2>
+	<p>Expected results from the course labs (bgp-multi-homed-stub, bgp-multi-homed) and slides (430-bgp-internet-hierarchy, "a forbidden path in the model"). Open this file in a browser, no server needed.</p>
+	<p id="summary"></p>
+	<table id="results"><tr><th></th><th>Test</th><th>Details</th></tr></table>
+
+	<script>
+		/* ---- labs as in their frr.conf files, built with the generator model ---- */
+
+		// routers: { name: { as, ifs: [[domain, ip], ...] (eth0, eth1...), networks, flags, rip, neighbors: [{ ip, as, in, out, defaultOriginate }], lists } }
+		// lists: { "prefix-list": { name: [[action, prefix], ...] }, "access-list": {...}, "route-map": { name: [{ action, matches: [[match, list]], sets: [[set, value]] }] } }
+		function buildLab(routers) {
+			let netkit = [], id = 1;
+			for (let name in routers) {
+				let spec = routers[name], m = JSON.clone(backbone);
+				m.name = name;
+				m.type = "router";
+				m.interfaces.if = spec.ifs.map((x, i) => ({ eth: { number: i, domain: x[0] }, ip: x[1] }));
+				m.interfaces.counter = m.interfaces.if.length;
+				if (spec.rip) Object.assign(m.routing.rip, { en: true, network: spec.rip, bgp: !!spec.ripBgp });
+				if (spec.as) {
+					let bgp = m.routing.bgp, lists = spec.lists || {}, ids = {};
+					Object.assign(bgp, { en: true, as: String(spec.as), network: spec.networks || [] });
+					for (let f of spec.flags || []) bgp[f] = true;
+					for (let type of ["prefix-list", "access-list", "as-path", "route-map"]) {
+						for (let pname in lists[type] || {}) {
+							let p = { id: id++, type: type, name: pname, rules: [] };
+							ids[type + " " + pname] = p.id;
+							bgp.policies.push(p);
+							lists[type][pname].forEach(function (r, i) {
+								let rule = { seq: (i + 1) * (type == "route-map" ? 10 : 5), action: r.action || r[0] };
+								if (type == "prefix-list") Object.assign(rule, { prefix: r[1], ge: null, le: null });
+								if (type == "access-list") Object.assign(rule, { prefix: r[1], exactMatch: false });
+								if (type == "as-path") rule.regex = r[1];
+								if (type == "route-map") Object.assign(rule, {
+									matches: (r.matches || []).map(x => ({ match: x[0], value: ids[ROUTE_MAP_MATCHES.find(d => d.match == x[0]).type + " " + x[1]] })),
+									sets: (r.sets || []).map(x => ({ set: x[0], value: x[1] }))
+								});
+								p.rules.push(rule);
+							});
+						}
+					}
+					bgp.remote = (spec.neighbors || []).map(function (n) {
+						let r = JSON.clone(backbone.routing.bgp.remote[0]);
+						Object.assign(r, { neighbor: n.ip, as: String(n.as), defaultOriginate: !!n.defaultOriginate });
+						for (let dir of ["in", "out"]) {
+							for (let cmd in n[dir] || {}) r.apply[cmd][dir] = ids[NEIGHBOR_POLICY_CMDS.find(c => c.cmd == cmd).type + " " + n[dir][cmd]];
+						}
+						return r;
+					});
+				}
+				netkit.push(m);
+			}
+			return netkit;
+		}
+
+		// lab bgp-multi-homed-stub: AS100 multi-homed to AS20, primary as20r2 (11.0.0.2), backup as20r1 (11.0.0.6, local-pref 90 in, MED 10 out)
+		function multiHomedStub() {
+			return buildLab({
+				as100r1: {
+					as: 100, ifs: [["E", "11.0.0.1/30"], ["F", "11.0.0.5/30"], ["J", "100.1.0.1/16"]], networks: ["100.1.0.0/16"],
+					neighbors: [
+						{ ip: "11.0.0.2", as: 20, out: { "prefix-list": "mineOutOnly" }, in: { "prefix-list": "defaultIn" } },
+						{ ip: "11.0.0.6", as: 20, out: { "prefix-list": "mineOutOnly", "route-map": "metricOut" }, in: { "prefix-list": "defaultIn", "route-map": "localPrefIn" } }
+					],
+					lists: {
+						"access-list": { myAggregate: [["permit", "100.1.0.0/16"]] },
+						"prefix-list": { mineOutOnly: [["permit", "100.1.0.0/16"]], defaultIn: [["permit", "0.0.0.0/0"]] },
+						"route-map": {
+							metricOut: [{ action: "permit", matches: [["ip address", "myAggregate"]], sets: [["metric", "10"]] }],
+							localPrefIn: [{ action: "permit", sets: [["local-preference", "90"]] }]
+						}
+					}
+				},
+				as200r1: {
+					as: 200, ifs: [["A", "11.0.0.33/30"], ["B", "200.2.0.1/16"]], networks: ["200.2.0.0/16"], flags: ["noEbgpRequiresPolicy"],
+					neighbors: [{ ip: "11.0.0.34", as: 20 }]
+				},
+				as20r1: {
+					as: 20, ifs: [["A", "11.0.0.34/30"], ["F", "11.0.0.6/30"], ["C", "20.1.1.1/24"]],
+					networks: ["20.1.1.0/24", "11.0.0.4/30", "11.0.0.32/30", "0.0.0.0/0"],
+					neighbors: [
+						{ ip: "11.0.0.33", as: 200, defaultOriginate: true, in: { "prefix-list": "as200In" }, out: { "prefix-list": "defaultOut" } },
+						{ ip: "11.0.0.5", as: 100, defaultOriginate: true, in: { "prefix-list": "as100In" }, out: { "prefix-list": "defaultOut" } },
+						{ ip: "20.1.1.2", as: 20 }
+					],
+					lists: { "prefix-list": { as200In: [["permit", "200.2.0.0/16"]], as100In: [["permit", "100.1.0.0/16"]], defaultOut: [["permit", "0.0.0.0/0"]] } }
+				},
+				as20r2: {
+					as: 20, ifs: [["E", "11.0.0.2/30"], ["C", "20.1.1.2/24"]], networks: ["20.1.1.0/24", "11.0.0.0/30", "0.0.0.0/0"],
+					neighbors: [
+						{ ip: "11.0.0.1", as: 100, defaultOriginate: true, in: { "prefix-list": "as100In" }, out: { "prefix-list": "defaultOut" } },
+						{ ip: "20.1.1.1", as: 20 }
+					],
+					lists: { "prefix-list": { as100In: [["permit", "100.1.0.0/16"]], defaultOut: [["permit", "0.0.0.0/0"]] } }
+				}
+			});
+		}
+
+		// lab bgp-multi-homed: AS300 announces 200.1.0.0/16 to both providers, 200.1.0.0/17 only to AS30, 200.1.128.0/17 only to AS40
+		function multiHomed() {
+			let as300 = (eth0, eth1, peer, peerAs, half) => ({
+				as: 300, ifs: [eth0, eth1], rip: ["200.1.0.0/16"], ripBgp: true, networks: ["200.1.0.0/16", half], flags: ["noNetworkImportCheck"],
+				neighbors: [{ ip: peer, as: peerAs, out: { "prefix-list": "mineOutOnly" }, in: { "prefix-list": "defaultIn" } }],
+				lists: { "prefix-list": { mineOutOnly: [["permit", "200.1.0.0/16"], ["permit", half]], defaultIn: [["permit", "0.0.0.0/0"]] } }
+			});
+			let provider = (as, ifs, lan, toAs300, as300Ip, toAs1, half) => ({
+				as: as, ifs: ifs, networks: [lan, toAs300], flags: ["noEbgpRequiresPolicy"],
+				neighbors: [
+					{ ip: as300Ip, as: 300, defaultOriginate: true, in: { "prefix-list": "as300In" }, out: { "prefix-list": "defaultRoute" } },
+					{ ip: toAs1, as: 1, in: { "prefix-list": "defaultRoute" } }
+				],
+				lists: { "prefix-list": { as300In: [["permit", "200.1.0.0/16"], ["permit", half]], defaultRoute: [["permit", "0.0.0.0/0"]] } }
+			});
+			return buildLab({
+				as1r1: {
+					as: 1, ifs: [["Q", "11.0.0.30/30"], ["S", "11.0.0.26/30"]], networks: ["11.0.0.24/30", "11.0.0.28/30", "0.0.0.0/0"], flags: ["noNetworkImportCheck"],
+					neighbors: [
+						{ ip: "11.0.0.25", as: 30, out: { "prefix-list": "defaultOut" }, in: { "prefix-list": "acceptAny" } },
+						{ ip: "11.0.0.29", as: 40, out: { "prefix-list": "defaultOut" }, in: { "prefix-list": "acceptAny" } }
+					],
+					lists: { "prefix-list": { defaultOut: [["permit", "0.0.0.0/0"]], acceptAny: [["permit", "any"]] } }
+				},
+				as30r1: provider(30, [["N", "11.0.0.10/30"], ["R", "30.3.3.1/24"], ["S", "11.0.0.25/30"]], "30.3.3.0/24", "11.0.0.8/30", "11.0.0.9", "11.0.0.26", "200.1.0.0/17"),
+				as40r1: provider(40, [["O", "11.0.0.14/30"], ["P", "40.4.4.1/24"], ["Q", "11.0.0.29/30"]], "40.4.4.0/24", "11.0.0.12/30", "11.0.0.13", "11.0.0.30", "200.1.128.0/17"),
+				as300r1: as300(["N", "11.0.0.9/30"], ["Y", "200.1.0.1/18"], "11.0.0.10", 30, "200.1.0.0/17"),
+				as300r2: as300(["O", "11.0.0.13/30"], ["X", "200.1.64.1/18"], "11.0.0.14", 40, "200.1.128.0/17"),
+				as300r3: { ifs: [["M", "200.1.128.1/17"], ["Y", "200.1.0.2/18"]], rip: ["200.1.0.0/16"] },
+				as300r4: { ifs: [["X", "200.1.64.2/18"], ["M", "200.1.128.2/17"]], rip: ["200.1.0.0/16"] }
+			});
+		}
+
+		// slide "a forbidden path in the model": AS8 is a customer of AS4 and AS5, the path AS4 AS8 AS5 is a valley
+		var HIERARCHY = [[1, "peer", 2], [3, "c2p", 1], [4, "c2p", 1], [5, "c2p", 2], [3, "peer", 4], [6, "c2p", 3], [7, "c2p", 3], [7, "c2p", 4], [8, "c2p", 4], [8, "c2p", 5], [9, "c2p", 5]];
+		function hierarchy(model) {
+			let routers = {};
+			for (let x = 1; x <= 9; x++) routers["as" + x + "r1"] = { as: x, ifs: [["LAN" + x, "100." + x + ".0.1/16"]], networks: ["100." + x + ".0.0/16"], flags: ["noEbgpRequiresPolicy"], neighbors: [] };
+			HIERARCHY.forEach(function (rel, k) {
+				let [a, , b] = rel, ra = routers["as" + a + "r1"], rb = routers["as" + b + "r1"], net = "10.0." + k + ".";
+				ra.ifs.push(["L" + a + "-" + b, net + "1/30"]);
+				rb.ifs.push(["L" + a + "-" + b, net + "2/30"]);
+				ra.neighbors.push({ ip: net + "2", as: b });
+				rb.neighbors.push({ ip: net + "1", as: a });
+			});
+			let bgpAs = { relations: HIERARCHY.map(r => ({ a: String(r[0]), b: String(r[2]), type: r[1] })), ases: {} };
+			let netkit = buildLab(routers);
+			for (let x = 1; x <= 9; x++) bgpAs.ases[x] = { model: model, lp: Object.assign({}, DEFAULT_LOCAL_PREF) };
+			// "Apply" of every auto-generated route-map, as in the BGP policies of each router
+			for (let m of netkit) for (let r of m.routing.bgp.remote) r.auto = { in: "applied", out: "applied" };
+			return { netkit: netkit, bgpAs: bgpAs };
+		}
+
+		/* ---- tests ---- */
+
+		function runBgpSimTests() {
+			let results = [];
+			let test = function (name, fn) {
+				try {
+					let detail = [], ok = fn(detail);
+					results.push({ name: name, ok: ok, detail: detail.join("\n") });
+				} catch (e) {
+					results.push({ name: name, ok: false, detail: "exception: " + (e.stack || e) });
+				}
+			};
+			let show = t => (t.hops.filter(h => h.prefix).map(h => h.m + " [" + h.prefix + " " + h.type + (h.nh ? " nh " + h.nh : "") + " via " + h.via + (h.path !== undefined ? " path " + h.path : "") + "] " + h.reason).join("\n")
+				+ "\n" + (t.delivered ? "delivered at " + t.end : "FAILED: " + t.fail));
+			let trace = (sim, src, dst, detail) => {
+				let t = bgpSimTrace(sim, src, parseIp(dst));
+				detail.push(src + " -> " + dst + ":\n" + show(t));
+				return t;
+			};
+			let hopOf = (t, name) => t.hops.find(h => h.m == name) || {};
+			let downKey = (sim, router, ip) => sim.sessions.find(s => s.ends.some(e => e.r.name == router && e.remote.neighbor == ip)).key;
+			let noProblems = function (sim, detail) {
+				let down = sim.sessions.filter(s => !s.up);
+				detail.push("converged: " + sim.converged + "; warnings: " + (sim.warnings.map(w => w.text).join("; ") || "none") + "; sessions down: " + (down.map(s => s.label).join(", ") || "none"));
+				return sim.converged && !down.length;
+			};
+			let bgpAs0 = { relations: [], ases: {} };
+
+			test("multi-homed-stub, primary link up: as200r1 -> 100.1.0.1 goes through as20r2 (20.1.1.2)", function (detail) {
+				let sim = bgpSimulate(multiHomedStub(), bgpAs0);
+				let ok = noProblems(sim, detail);
+				let t = trace(sim, "as200r1", "100.1.0.1", detail);
+				return ok && t.delivered && hopOf(t, "as20r1").via == "20.1.1.2" && hopOf(t, "as20r1").next == "as20r2";
+			});
+
+			test("multi-homed-stub, primary link up (control): as100r1 -> 200.2.0.1 uses the primary neighbor 11.0.0.2", function (detail) {
+				let sim = bgpSimulate(multiHomedStub(), bgpAs0);
+				let t = trace(sim, "as100r1", "200.2.0.1", detail);
+				return t.delivered && t.hops[0].via == "11.0.0.2";
+			});
+
+			test("multi-homed-stub, primary session shut down on as100r1: as100r1 -> 200.2.0.1 via the backup neighbor 11.0.0.6", function (detail) {
+				let lab = multiHomedStub(), sim0 = bgpSimulate(lab, bgpAs0), key = downKey(sim0, "as100r1", "11.0.0.2"), down = { sessions: {}, domains: {} };
+				down.sessions[key] = true;
+				let sim = bgpSimulate(lab, bgpAs0, { down: down });
+				detail.push("down: " + key);
+				let t = trace(sim, "as100r1", "200.2.0.1", detail);
+				return t.delivered && t.hops[0].via == "11.0.0.6" && t.hops[0].next == "as20r1";
+			});
+
+			test("multi-homed-stub, same with 'neighbor 11.0.0.2 shutdown' in the BGP free text of as100r1", function (detail) {
+				let lab = multiHomedStub();
+				lab.find(m => m.name == "as100r1").routing.bgp.free = "neighbor 11.0.0.2 shutdown";
+				let sim = bgpSimulate(lab, bgpAs0);
+				let t = trace(sim, "as100r1", "200.2.0.1", detail);
+				return t.delivered && t.hops[0].via == "11.0.0.6";
+			});
+
+			test("multi-homed (load sharing): as1r1 -> 200.1.0.2 via the AS30 side (11.0.0.25)", function (detail) {
+				let sim = bgpSimulate(multiHomed(), bgpAs0);
+				let ok = noProblems(sim, detail);
+				let t = trace(sim, "as1r1", "200.1.0.2", detail);
+				return ok && t.hops[0].via == "11.0.0.25" && t.hops[0].prefix == "200.1.0.0/17" && t.delivered;
+			});
+
+			test("multi-homed (load sharing): as1r1 -> 200.1.128.2 via the AS40 side (11.0.0.29)", function (detail) {
+				let sim = bgpSimulate(multiHomed(), bgpAs0);
+				let t = trace(sim, "as1r1", "200.1.128.2", detail);
+				return t.hops[0].via == "11.0.0.29" && t.hops[0].prefix == "200.1.128.0/17" && t.delivered;
+			});
+
+			test("forbidden path: with the customer-provider model applied, AS4 reaches AS5 via AS1 AS2, not via AS8", function (detail) {
+				let lab = hierarchy("cp"), sim = bgpSimulate(lab.netkit, lab.bgpAs);
+				let ok = noProblems(sim, detail);
+				let t = trace(sim, "as4r1", "100.5.0.1", detail), ases = bgpSimRouteAses(t), v = bgpSimValley(lab.bgpAs, ases);
+				detail.push("AS-path " + ases.join(" ") + ": " + v.text);
+				let back = trace(sim, "as5r1", "100.4.0.1", detail), backAses = bgpSimRouteAses(back);
+				detail.push("AS-path " + backAses.join(" "));
+				return ok && ases.join(" ") == "4 1 2 5" && v.status == "type-2" && t.delivered && backAses.join(" ") == "5 2 1 4" && back.delivered;
+			});
+
+			test("forbidden path: with the customer-provider model applied, every route of every router is valley-free", function (detail) {
+				let lab = hierarchy("cp"), sim = bgpSimulate(lab.netkit, lab.bgpAs), bad = [];
+				for (let R of sim.routers) for (let k in R.best) {
+					let b = R.best[k], v = b.local ? null : bgpSimValley(lab.bgpAs, [R.asn].concat(b.path));
+					if (v && v.status != "type-1" && v.status != "type-2") bad.push(R.name + " " + k + " path " + b.path.join(" ") + ": " + v.text);
+				}
+				detail.push(bad.join("\n") || "all valley-free");
+				return !bad.length;
+			});
+
+			test("forbidden path (control): without a model AS4 picks the valley AS4 AS8 AS5, and it is flagged", function (detail) {
+				let lab = hierarchy("none"), sim = bgpSimulate(lab.netkit, lab.bgpAs);
+				let t = trace(sim, "as4r1", "100.5.0.1", detail), ases = bgpSimRouteAses(t), v = bgpSimValley(lab.bgpAs, ases);
+				detail.push("AS-path " + ases.join(" ") + ": " + v.text);
+				return ases.join(" ") == "4 8 5" && v.status == "invalid";
+			});
+
+			/* engine details the labs above rely on */
+
+			test("import-check: as20r1 does not announce network 0.0.0.0/0 (no default route in its routing table)", function (detail) {
+				let sim = bgpSimulate(multiHomedStub(), bgpAs0), r = (sim.byName.as20r1.table["0.0.0.0/0"] || []).find(x => x.local);
+				detail.push(r ? r.status + ": " + r.reason : "no local route");
+				return r && r.status == "rejected" && /import-check/.test(r.reason);
+			});
+
+			test("ebgp-requires-policy: without the flag as200r1 exchanges nothing and the lost announcement is explained", function (detail) {
+				let lab = multiHomedStub();
+				lab.find(m => m.name == "as200r1").routing.bgp.noEbgpRequiresPolicy = false;
+				let sim = bgpSimulate(lab, bgpAs0), q = bgpSimQuery(sim, { source: "as200r1", dest: "100.1.0.1" }), t = q.traces[0];
+				detail.push(show(t), JSON.stringify(t.lost));
+				return !t.delivered && t.lost.some(l => l.rows.some(r => /ebgp-requires-policy/.test(r.reason)));
+			});
+
+			test("next hop unreachable: without 'network 11.0.0.0/30' on as20r2, as20r1 cannot use the iBGP route and goes via as100r1 directly", function (detail) {
+				let lab = multiHomedStub();
+				let r2 = lab.find(m => m.name == "as20r2");
+				r2.routing.bgp.network = r2.routing.bgp.network.filter(n => n != "11.0.0.0/30");
+				let sim = bgpSimulate(lab, bgpAs0), t = trace(sim, "as200r1", "100.1.0.1", detail);
+				let ibgp = sim.byName.as20r1.table["100.1.0.0/16"].find(r => !r.ebgp);
+				detail.push("iBGP route: " + ibgp.status + " " + ibgp.reason);
+				return ibgp.status == "invalid" && hopOf(t, "as20r1").next == "as100r1";
+			});
+
+			test("route-map with two 'match ip address prefix-list': FRR keeps the last one", function (detail) {
+				let lab = multiHomedStub(), r1 = lab.find(m => m.name == "as100r1"), bgp = r1.routing.bgp;
+				let pl = (name, prefix) => { let p = { id: 900 + bgp.policies.length, type: "prefix-list", name: name, rules: [{ seq: 5, action: "permit", prefix: prefix, ge: null, le: null }] }; bgp.policies.push(p); return p.id; };
+				let rm = bgp.policies.find(p => p.name == "localPrefIn");
+				rm.rules[0].matches = [{ match: "ip address prefix-list", value: pl("defaultOnly", "0.0.0.0/0") }, { match: "ip address prefix-list", value: pl("nothing", "1.2.3.0/24") }];
+				let sim = bgpSimulate(lab, bgpAs0), r = sim.byName.as100r1.table["0.0.0.0/0"].find(x => x.end.remote.neighbor == "11.0.0.6");
+				detail.push(r.status + ": " + r.reason, sim.warnings.map(w => w.text).join("\n"));
+				return r.status == "rejected" && /no entry matches/.test(r.reason) && sim.warnings.some(w => /keeps only the last/.test(w.text));
+			});
+
+			test("expected path: the first divergence is reported", function (detail) {
+				let sim = bgpSimulate(multiHomedStub(), bgpAs0), t = bgpSimTrace(sim, "as200r1", parseIp("100.1.0.1"));
+				let a = bgpSimExpected(sim, t, "as200r1 as20r1 as100r1"), b = bgpSimExpected(sim, t, "200 20 100"), c = bgpSimExpected(sim, t, "as200r1 as20r1 as20r2 as100r1");
+				detail.push(a.text, b.text, c.text);
+				return !a.ok && a.index == 2 && b.ok && c.ok;
+			});
+			return results;
+		}
+	</script>
+	<script>
+		(function () {
+			let results = runBgpSimTests(), table = document.getElementById("results");
+			for (let r of results) {
+				let tr = table.insertRow();
+				tr.insertCell().innerHTML = r.ok ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>';
+				tr.insertCell().textContent = r.name;
+				let pre = document.createElement("pre");
+				pre.textContent = r.detail;
+				tr.insertCell().appendChild(pre);
+			}
+			let failed = results.filter(r => !r.ok).length;
+			let s = document.getElementById("summary");
+			s.className = failed ? "fail" : "pass";
+			s.textContent = failed ? failed + " of " + results.length + " tests FAILED" : "all " + results.length + " tests passed";
+		})();
+	</script>
+</body>
+
+</html>
