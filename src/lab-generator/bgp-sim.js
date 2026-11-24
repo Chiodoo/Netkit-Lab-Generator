@@ -76,6 +76,10 @@ function simRouterConfig(M, bgpAs) {
 		else if (!/^(log|debug|hostname|password|enable password|service|line|exit|end)\b/.test(line))
 			M.warn("'" + line + "' in the FRR free text is not simulated");
 	}
+	for (let p of ["rip", "ospf", "bgp"]) {
+		if (!r[p].en) continue;
+		for (let x of redistributions(r, p, r.bgp.policies)) if (x.policy) M.warn("route-map " + x.policy.name + " on " + p + " redistribute " + x.src + " is not simulated: the routes are redistributed without it");
+	}
 	for (let p of ["rip", "ospf"]) {
 		if (!r[p].en) continue;
 		for (let line of simFreeLines(r[p].free)) M.warn("'" + line + "' in the " + p.toUpperCase() + " free text is not simulated");
@@ -90,7 +94,7 @@ function simRouterConfig(M, bgpAs) {
 	M.requiresPolicy = M.frr && !bgp.noEbgpRequiresPolicy;
 	M.importCheck = M.frr && !bgp.noNetworkImportCheck;
 	M.networks = (bgp.network || []).filter(n => n);
-	M.redistribute = [];
+	M.redistribute = REDISTRIBUTE.bgp.filter(src => bgp[src]);
 	M.nbr = {};	// free text per neighbor address: shutdown, nextHopSelf, multihop, updateSource, defaultOriginate
 	let nbr = ip => M.nbr[ip] = M.nbr[ip] || {};
 	for (let line of simFreeLines(bgp.free)) {
@@ -120,6 +124,7 @@ function simRouterConfig(M, bgpAs) {
 			let kinds = rule.matches.map(m => m.match);
 			if (kinds.some((k, i) => kinds.indexOf(k) != i))
 				M.warn("route-map " + p.name + " seq " + rule.seq + " has two 'match' of the same kind: FRR keeps only the last one, the simulation does the same");
+			if (kinds.indexOf("interface") >= 0) M.warn("route-map " + p.name + " seq " + rule.seq + ": match interface is not simulated (never matches)");
 		}
 	}
 }
@@ -203,9 +208,12 @@ function simRouteMap(M, name, route, ebgpOut, at) {
 		let last = {};
 		for (let m of rule.matches) last[m.match] = m;	// FRR keeps the last match of each kind
 		let ok = Object.keys(last).every(function (kind) {
-			let type = ROUTE_MAP_MATCHES.find(d => d.match == kind).type;
+			let type = matchDef(last[kind]).type;
+			if (!type) return false;	// match interface: not simulated (warned)
 			let list = findPolicy(M.eff.policies, last[kind].value, type);
-			let res = list && simListApply(M, type, list.name, route);
+			// match ip next-hop: the next hop as a /32 (a prefix-list needs le 32 to match it inside a subnet)
+			let subject = !/next-hop/.test(kind) ? route : route.nh === null || route.nh === undefined ? null : { prefix: { net: route.nh, len: 32 }, path: [] };
+			let res = list && subject && simListApply(M, type, list.name, subject);
 			return res && res.permit;
 		});
 		if (!ok) continue;

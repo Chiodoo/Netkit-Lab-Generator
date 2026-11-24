@@ -119,6 +119,51 @@ assert.ok(old.netkit.every(m => Array.isArray(m.routing.bgp.policies)));
 lab = ctx.makeFilesStructure(old.netkit, old.labInfo);
 assert.ok(!/prefix-list|route-map|access-list/.test(Object.values(lab.file).join("")));
 
+/* route-maps on redistribute statements (RIP, OSPF, BGP) */
+{
+	const cfg = loadConfig("examples/example_bgp_policies.config");
+	const r = cfg.netkit.find(m => m.name == "r10"), routing = r.routing, pol = routing.bgp.policies;
+	const peers = { id: 901, type: "prefix-list", name: "peers", rules: [{ seq: 5, action: "permit", prefix: "50.1.10.0/24", ge: null, le: 32 }] };
+	const rm = { id: 902, type: "route-map", name: "toIgp", rules: [
+		{ seq: 10, action: "permit", matches: [{ match: "ip next-hop prefix-list", value: 901 }], sets: [{ set: "metric", value: "5" }, { set: "tag", value: "7" }] },
+		{ seq: 20, action: "permit", matches: [{ match: "interface", value: "eth1" }], sets: [{ set: "metric-type", value: "type-1" }] }] };
+	pol.push(peers, rm);
+	Object.assign(routing.rip, { en: true, network: ["50.0.0.0/8"], connected: true, bgp: true, rmap: { bgp: 902 } });
+	Object.assign(routing.ospf, { en: true, network: ["50.0.0.0/8"], connected: true, rmap: { connected: 902 } });
+	Object.assign(routing.bgp, { connected: true, rmap: { connected: 902 } });
+	let conf = ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r10/etc/frr/frr.conf"].split("\n");
+	for (const line of [
+		"\tredistribute connected", "\tredistribute bgp route-map toIgp", "\tredistribute connected route-map toIgp",
+		"ip prefix-list peers seq 5 permit 50.1.10.0/24 le 32", "route-map toIgp permit 10", "\tmatch ip next-hop prefix-list peers",
+		"\tset metric 5", "\tset tag 7", "\tmatch interface eth1", "\tset metric-type type-1"
+	]) assert.ok(conf.includes(line), "r10 misses: " + line);
+	assert.equal(conf.filter(l => l == "\tredistribute connected route-map toIgp").length, 2, "ospf and bgp");
+	assert.ok(conf.indexOf("router bgp 10") < conf.indexOf("\tredistribute connected route-map toIgp", conf.indexOf("router bgp 10")));
+	assert.deepEqual(ctx.policyReferences(routing, rm), ["rip redistribute bgp", "ospf redistribute connected", "bgp redistribute connected"]);
+	assert.deepEqual(ctx.policyReferences(routing, peers), ["route-map toIgp seq 10"]);
+	assert.equal(ctx.policyRuleExplain(pol, rm, rm.rules[1]), "Announcements matching interface eth1 are accepted with metric-type type-1 (permit, seq 20)");
+	assert.match(ctx.policyRuleError(pol, rm, { seq: 30, action: "permit", matches: [{ match: "interface", value: "" }], sets: [] }), /interface name/);
+	assert.match(ctx.policyRuleError(pol, rm, { seq: 30, action: "permit", matches: [], sets: [{ set: "metric-type", value: "3" }] }), /type-1 or type-2/);
+
+	// without bgp: only the route-maps of the redistribute statements and their lists, after the IGP blocks
+	routing.bgp.en = false;
+	conf = ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r10/etc/frr/frr.conf"];
+	assert.ok(conf.includes("route-map toIgp permit 10") && conf.includes("ip prefix-list peers seq 5"));
+	assert.ok(!conf.includes("providerIn"), "unused policies are not written without bgp");
+	assert.ok(conf.indexOf("router ospf") < conf.indexOf("ip prefix-list peers"));
+
+	// quagga: every daemon reads only its own file
+	r.routingSoftware = "quagga";
+	const files = ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file;
+	assert.match(files["r10/etc/zebra/ripd.conf"], /\tredistribute bgp route-map toIgp\n[\s\S]*ip prefix-list peers seq 5 permit 50.1.10.0\/24 le 32\n[\s\S]*route-map toIgp permit 10\n/);
+	assert.match(files["r10/etc/zebra/ospfd.conf"], /\tredistribute connected route-map toIgp\n/);
+	assert.ok(files["r10/etc/zebra/ripd.conf"].indexOf("route-map toIgp") < files["r10/etc/zebra/ripd.conf"].indexOf("log file"));
+
+	// a route-map that no longer exists: the statement is skipped, not written without it
+	routing.rip.rmap.bgp = 999;
+	assert.match(ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r10/etc/zebra/ripd.conf"], /! redistribute bgp skipped/);
+}
+
 /* suggestions: r20 peers are the routers on its collision domains */
 const sugg = ctx.labSuggestions(loadConfig("examples/example_bgp_policies.config").netkit);
 const idx = example.netkit.findIndex(m => m.name == "r20");

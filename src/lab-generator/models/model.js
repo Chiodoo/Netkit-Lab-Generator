@@ -57,6 +57,8 @@ var backbone = {
 			connected: false,
 			ospf: false,
 			bgp: false,
+			static: false,
+			rmap: {},	// rmap[source] = id of the route-map of "redistribute <source>", see REDISTRIBUTE in bgp-policy.js
 			network: [""],
 			route: [""],
 			free: ""
@@ -66,6 +68,8 @@ var backbone = {
 			connected: false,
 			rip: false,
 			bgp: false,
+			static: false,
+			rmap: {},
 			if: [],
 			network: [""],
 			area: ["0.0.0.0"],
@@ -78,6 +82,11 @@ var backbone = {
 			noEbgpRequiresPolicy: false,
 			noNetworkImportCheck: false,
 			network: [""],
+			connected: false,	// redistribute
+			static: false,
+			rip: false,
+			ospf: false,
+			rmap: {},
 			remote: [{
 				neighbor: "",
 				as: "",

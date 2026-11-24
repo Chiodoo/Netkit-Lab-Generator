@@ -118,6 +118,11 @@ function makeRouterFrr(machine, lab, bgpAs) {
 
 			if (machine.routing.bgp.en) 
 				makeBgpConfFrr(machine, lab, bgpAs);
+			else {
+				// without bgp: only the route-maps of the redistribute statements (and their lists)
+				let used = redistributePolicies(machine.routing, ["rip", "ospf"].filter(p => machine.routing[p].en), machine.routing.bgp.policies);
+				if (used.length) lab.file[machine.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions({ policies: used }, "frr").replace(/^!\n\n/, "") + "\n";
+			}
 
 			//nb: i costi vanno qui alla fine
 			if (machine.routing.ospf.en) {
@@ -152,16 +157,8 @@ function makeRouterRipFrr(machine, lab){
 			lab.file[machine.name + "/etc/frr/frr.conf"] += "\troute " + route + "\n";
 	}
 
-		//nb: mantenere l'ordine
-	if (machine.routing.rip.en && machine.routing.rip.connected) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute connected\n";
-	}
-	if (machine.routing.rip.en && machine.routing.rip.ospf) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute ospf\n";
-	}
-	if (machine.routing.rip.en && machine.routing.rip.bgp) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute bgp\n";
-	}
+	//nb: mantenere l'ordine (REDISTRIBUTE in bgp-policy.js)
+	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine.routing, "rip", machine.routing.bgp.policies);
 
 	//Free conf
 	if (machine.routing.rip.free && machine.routing.rip.free != "")
@@ -178,15 +175,7 @@ function makeRouterOspfFrr(machine, lab){
 		if (machine.routing.ospf.stub[m] && machine.routing.ospf.stub[m]!="")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += "\tarea " + machine.routing.ospf.area[m] + " stub\n";
 	}
-	if (machine.routing.ospf.en && machine.routing.ospf.connected) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute connected\n";
-	}
-	if (machine.routing.ospf.en && machine.routing.ospf.rip) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute rip\n";
-	}
-	if (machine.routing.ospf.en && machine.routing.ospf.bgp) {
-		lab.file[machine.name + "/etc/frr/frr.conf"] += "\tredistribute bgp\n";
-	}
+	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine.routing, "ospf", machine.routing.bgp.policies);
 
 	//Free conf
 	if (machine.routing.ospf.free && machine.routing.ospf.free != "")
@@ -205,12 +194,16 @@ function makeBgpConfFrr(router, lab, bgpAs) {
 	if (router.routing.bgp.noNetworkImportCheck)
 		lab.file[router.name + "/etc/frr/frr.conf"] += "\tno bgp network import-check\n";
 
+	// manual policies + the auto-generated ones that are applied
+	let bgp = effectiveBgp(router, bgpAs);
+
 	// Inserimento tutte le Network su cui annunciare BGP
 	for (let network of router.routing.bgp.network) {
 		if (network && network != "") {
 			lab.file[router.name + "/etc/frr/frr.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
+	lab.file[router.name + "/etc/frr/frr.conf"] += redistributeLines(router.routing, "bgp", bgp.policies);
 
 	router.routing.bgp.remote.forEach(function (remote) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
@@ -225,7 +218,6 @@ function makeBgpConfFrr(router, lab, bgpAs) {
 	});
 
 	//Policy dei neighbor (manuali + generate dai modelli e applicate): dopo tutti i remote-as, altrimenti vengono ignorate
-	let bgp = effectiveBgp(router, bgpAs);
 	lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborPolicyLines(bgp);
 
 	//Free conf
@@ -292,24 +284,13 @@ function makeRouterQuagga(machine, lab, bgpAs) {
 
 			if (machine.routing.bgp.en) makeBgpConfQuagga(machine, lab, bgpAs);
 
-			//nb: mantenere l'ordine
-			if (machine.routing.rip.en && machine.routing.rip.connected) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute connected\n";
-			}
-			if (machine.routing.ospf.en && machine.routing.ospf.connected) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute connected\n";
-			}
-			if (machine.routing.rip.en && machine.routing.rip.ospf) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute ospf\n";
-			}
-			if (machine.routing.rip.en && machine.routing.rip.bgp) {
-				lab.file[machine.name + "/etc/zebra/ripd.conf"] += "\tredistribute bgp\n";
-			}
-			if (machine.routing.ospf.en && machine.routing.ospf.rip) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute rip\n";
-			}
-			if (machine.routing.ospf.en && machine.routing.ospf.bgp) {
-				lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tredistribute bgp\n";
+			//nb: mantenere l'ordine (REDISTRIBUTE in bgp-policy.js); every daemon reads only its own file:
+			//the route-maps of its redistribute statements (and their lists) are defined there too
+			for (let p of ["rip", "ospf"]) {
+				if (!machine.routing[p].en) continue;
+				let file = machine.name + "/etc/zebra/" + p + "d.conf", policies = machine.routing.bgp.policies;
+				lab.file[file] += redistributeLines(machine.routing, p, policies)
+					+ bgpPolicyDefinitions({ policies: redistributePolicies(machine.routing, [p], policies) }, "quagga");
 			}
 
 			//nb: i costi vanno qui alla fine
@@ -353,12 +334,15 @@ function makeBgpConfQuagga(router, lab, bgpAs) {
 		// Inserimento nome AS
 		+ "router bgp " + router.routing.bgp.as + "\n\n";
 
+	let bgp = effectiveBgp(router, bgpAs);
+
 	// Inserimento tutte le Network su cui annunciare BGP
 	for (let network of router.routing.bgp.network) {
 		if (network && network != "") {
 			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += redistributeLines(router.routing, "bgp", bgp.policies);
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\n";
 
@@ -375,7 +359,6 @@ function makeBgpConfQuagga(router, lab, bgpAs) {
 	});
 
 	//Policy dei neighbor (manuali + generate dai modelli e applicate): dopo tutti i remote-as, altrimenti vengono ignorate
-	let bgp = effectiveBgp(router, bgpAs);
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborPolicyLines(bgp);
 
 	//Free conf

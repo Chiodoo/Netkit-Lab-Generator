@@ -356,3 +356,7 @@ span.btn {
 		width: 540px;
 	}
 } */
+#netkit label.redistribute {
+	font-weight: normal;
+	margin-right: 4px;
+}

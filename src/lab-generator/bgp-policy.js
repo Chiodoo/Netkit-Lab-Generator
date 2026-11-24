@@ -19,18 +19,31 @@ var NEIGHBOR_POLICY_CMDS = [
 	{ cmd: "filter-list", type: "as-path" }
 ];
 
+// type: the kind of list the match takes, null for a plain value (placeholder)
 var ROUTE_MAP_MATCHES = [
 	{ match: "ip address prefix-list", type: "prefix-list" },
 	{ match: "ip address", type: "access-list" },
-	{ match: "as-path", type: "as-path" }
+	{ match: "as-path", type: "as-path" },
+	{ match: "ip next-hop prefix-list", type: "prefix-list" },
+	{ match: "ip next-hop", type: "access-list" },
+	{ match: "interface", type: null, placeholder: "eth0" }
 ];
 
 var ROUTE_MAP_SETS = [
 	{ set: "local-preference", placeholder: "200" },
 	{ set: "metric", placeholder: "10" },
 	{ set: "as-path prepend", placeholder: "10 10 10" },
-	{ set: "community", placeholder: "200:11111" }
+	{ set: "community", placeholder: "200:11111" },
+	{ set: "metric-type", placeholder: "type-1" },
+	{ set: "tag", placeholder: "10" }
 ];
+
+// redistribute <source> [route-map NAME] of each routing block, in the order the generator writes them
+var REDISTRIBUTE = {
+	rip: ["connected", "ospf", "bgp", "static"],
+	ospf: ["connected", "rip", "bgp", "static"],
+	bgp: ["connected", "static", "rip", "ospf"]
+};
 
 var MAX_UINT32 = 4294967295;
 
@@ -50,6 +63,22 @@ function migrateBgpPolicies(machine) {
 		if (remote && !remote.pref) remote.pref = defaultLinkPref();
 		if (remote && !remote.auto) remote.auto = { in: "", out: "" };
 	}
+	for (let p in REDISTRIBUTE) {
+		let cfg = machine.routing[p];
+		if (cfg && (!cfg.rmap || typeof cfg.rmap != "object")) cfg.rmap = {};
+	}
+}
+
+function matchDef(m) {
+	return ROUTE_MAP_MATCHES.find(d => d.match == m.match) || null;
+}
+
+// the list a match uses, or its plain value (match interface)
+function matchValue(policies, m) {
+	let def = matchDef(m);
+	if (!def.type) return String(m.value || "").trim();
+	let list = findPolicy(policies, m.value, def.type);
+	return list && list.name;
 }
 
 /* -------------------- addresses -------------------- */
@@ -149,6 +178,10 @@ function setValueError(set) {
 			return isUint(v, MAX_UINT32) ? "" : "a number between 0 and " + MAX_UINT32;
 		case "as-path prepend":
 			return v && v.split(/\s+/).every(t => isUint(t, MAX_UINT32) && +t > 0) ? "" : "one or more AS numbers, e.g. 10 10 10";
+		case "metric-type":
+			return v == "type-1" || v == "type-2" ? "" : "type-1 or type-2";
+		case "tag":
+			return isUint(v, MAX_UINT32) ? "" : "a number between 0 and " + MAX_UINT32;
 		case "community":
 			return v && v.split(/\s+/).every(t => /^(no-export|no-advertise|local-AS|internet|additive|none)$/.test(t)
 				|| (/^(\d+):(\d+)$/.test(t) && t.split(":").every(n => +n <= 65535))) ? "" : "AA:NN values, e.g. 200:11111";
@@ -158,8 +191,12 @@ function setValueError(set) {
 
 function routeMapRuleError(rule, policies) {
 	for (let m of rule.matches) {
-		let def = ROUTE_MAP_MATCHES.find(d => d.match == m.match);
+		let def = matchDef(m);
 		if (!def) return "unknown match";
+		if (!def.type) {
+			if (!/^[A-Za-z0-9_.:-]+$/.test(String(m.value || "").trim())) return "match " + m.match + ": an interface name like " + def.placeholder;
+			continue;
+		}
 		let used = findPolicy(policies, m.value, def.type);
 		if (!used) return "match " + m.match + ": choose a " + def.type;
 		if (policyNameError(used)) return "match " + m.match + ": the " + def.type + " has an invalid name";
@@ -199,9 +236,14 @@ function neighborPolicyError(remote) {
 	return "";
 }
 
-// where a policy is used on its router: deleting it is blocked while this is not empty
-function policyReferences(bgp, policy) {
-	let refs = [];
+// where a policy is used on its router (machine.routing): deleting it is blocked while this is not empty
+function policyReferences(routing, policy) {
+	let bgp = routing.bgp, refs = [];
+	for (let p in REDISTRIBUTE) {
+		for (let src of REDISTRIBUTE[p]) {
+			if (policy.type == "route-map" && routing[p].rmap && routing[p].rmap[src] == policy.id) refs.push(p + " redistribute " + src);
+		}
+	}
 	for (let remote of bgp.remote || []) {
 		for (let c of NEIGHBOR_POLICY_CMDS) {
 			for (let dir of ["in", "out"]) {
@@ -213,7 +255,7 @@ function policyReferences(bgp, policy) {
 	for (let p of bgp.policies || []) {
 		if (p.type != "route-map") continue;
 		for (let rule of p.rules) {
-			if (rule.matches.some(m => m.value == policy.id)) refs.push("route-map " + p.name + " seq " + rule.seq);
+			if (rule.matches.some(m => m.value == policy.id && matchDef(m) && matchDef(m).type == policy.type)) refs.push("route-map " + p.name + " seq " + rule.seq);
 		}
 	}
 	return refs;
@@ -242,7 +284,7 @@ function policyRuleExplain(policies, policy, rule) {
 		case "route-map": {
 			// same kind of match: OR, different kinds: AND
 			let groups = ROUTE_MAP_MATCHES.map(def => rule.matches.filter(m => m.match == def.match)
-				.map(m => def.match + " " + findPolicy(policies, m.value, def.type).name).join(" OR "))
+				.map(m => def.match + " " + matchValue(policies, m)).join(" OR "))
 				.filter(g => g);
 			let what = groups.length ? "Announcements matching " + groups.map(g => groups.length > 1 && g.indexOf(" OR ") > 0 ? "(" + g + ")" : g).join(" AND ") + " are"
 				: "Every announcement is";
@@ -291,8 +333,7 @@ function policyRuleLines(policies, policy, rule, quagga) {
 				+ " " + rule.action + " " + rule.regex + "\n";
 		case "route-map":
 			return "route-map " + policy.name + " " + rule.action + " " + rule.seq + "\n"
-				+ rule.matches.map(m => "\tmatch " + m.match + " "
-					+ findPolicy(policies, m.value, ROUTE_MAP_MATCHES.find(d => d.match == m.match).type).name + "\n").join("")
+				+ rule.matches.map(m => "\tmatch " + m.match + " " + matchValue(policies, m) + "\n").join("")
 				+ rule.sets.map(s => "\tset " + s.set + " " + String(s.value).trim().split(/\s+/).join(" ") + "\n").join("");
 	}
 	return "";
@@ -318,6 +359,37 @@ function bgpPolicyDefinitions(bgp, routingSoftware) {
 		}
 	}
 	return text ? text + "!\n" : "";
+}
+
+/* -------------------- redistribution -------------------- */
+
+// the redistribute statements of a routing block (rip, ospf, bgp): [{ src, policy (route-map or null), missing }]
+// missing: a route-map is chosen but does not exist or has an invalid name, the statement is skipped
+function redistributions(routing, proto, policies) {
+	let cfg = routing[proto];
+	return REDISTRIBUTE[proto].filter(src => cfg[src]).map(function (src) {
+		let id = cfg.rmap && cfg.rmap[src], policy = findPolicy(policies, id, "route-map");
+		return { src: src, policy: policy, missing: hasValue(id) && (!policy || !!policyNameError(policy)) };
+	});
+}
+
+function redistributeLines(routing, proto, policies) {
+	return redistributions(routing, proto, policies).map(r => r.missing
+		? "\t! redistribute " + r.src + " skipped: its route-map is missing or has an invalid name\n"
+		: "\tredistribute " + r.src + (r.policy ? " route-map " + r.policy.name : "") + "\n").join("");
+}
+
+// the route-maps of the redistribute statements of the given blocks and the lists they match on
+function redistributePolicies(routing, protos, policies) {
+	let used = [], add = p => { if (p && used.indexOf(p) < 0) used.push(p); };
+	for (let proto of protos) {
+		for (let r of redistributions(routing, proto, policies)) {
+			if (!r.policy || r.missing) continue;
+			for (let rule of r.policy.rules) for (let m of rule.matches) if (matchDef(m) && matchDef(m).type) add(findPolicy(policies, m.value, matchDef(m).type));
+			add(r.policy);
+		}
+	}
+	return used;
 }
 
 /* -------------------- suggestions (avoid typos) -------------------- */

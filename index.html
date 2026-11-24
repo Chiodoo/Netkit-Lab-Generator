@@ -481,17 +481,15 @@
 												class="form-control" list="lab-networks"
 												data-ng-model="machine.routing.rip.route[$index]" />
 										</div>
-										<div>
-											<input title="redistributeo" type="checkbox" value="1"
-												data-ng-model="machine.routing.rip.ospf" /> redistribute ospf
-										</div>
-										<div>
-											<input title="redistributeb" type="checkbox" value="1"
-												data-ng-model="machine.routing.rip.bgp" /> redistribute bgp
-										</div>
-										<div>
-											<input title="redistributec" type="checkbox" value="1"
-												data-ng-model="machine.routing.rip.connected" /> redistribute connected
+										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.rip">
+											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+												data-ng-model="machine.routing.rip[src]"
+												data-ng-change="redistToggle(machine.routing.rip, src)" /> redistribute {{src}}</label>
+											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
+												data-ng-show="machine.routing.rip[src]" data-ng-model="machine.routing.rip.rmap[src]"
+												data-ng-options="p.id as p.name for p in policiesOfType(machine, 'route-map')">
+												<option value="">no route-map</option>
+											</select>
 										</div>
 										<div>
 										<label data-ng-show="machine.routingSoftware == 'quagga'">Directly in ripd.conf:</label>
@@ -529,17 +527,15 @@
 											<input title="stub" type="checkbox" value="1"
 												data-ng-model="machine.routing.ospf.stub[$index]" /> stub?
 										</div>
-										<div>
-											<input title="redistributer" type="checkbox" value="1"
-												data-ng-model="machine.routing.ospf.rip" /> redistribute rip
-										</div>
-										<div>
-											<input title="redistributeb" type="checkbox" value="1"
-												data-ng-model="machine.routing.ospf.bgp" /> redistribute bgp
-										</div>
-										<div>
-											<input title="redistributec" type="checkbox" value="1"
-												data-ng-model="machine.routing.ospf.connected" /> redistribute connected
+										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.ospf">
+											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+												data-ng-model="machine.routing.ospf[src]"
+												data-ng-change="redistToggle(machine.routing.ospf, src)" /> redistribute {{src}}</label>
+											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
+												data-ng-show="machine.routing.ospf[src]" data-ng-model="machine.routing.ospf.rmap[src]"
+												data-ng-options="p.id as p.name for p in policiesOfType(machine, 'route-map')">
+												<option value="">no route-map</option>
+											</select>
 										</div>
 										<label>Cost: </label>
 										<div data-ng-repeat="o in machine.interfaces.if">
@@ -595,6 +591,16 @@
 												class="form-control" list="lab-networks"
 												data-ng-model="machine.routing.bgp.network[$index]" />
 										</div>
+										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.bgp">
+											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+												data-ng-model="machine.routing.bgp[src]"
+												data-ng-change="redistToggle(machine.routing.bgp, src)" /> redistribute {{src}}</label>
+											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
+												data-ng-show="machine.routing.bgp[src]" data-ng-model="machine.routing.bgp.rmap[src]"
+												data-ng-options="p.id as p.name for p in policiesOfType(machine, 'route-map')">
+												<option value="">no route-map</option>
+											</select>
+										</div>
 										<span class="btn btn-success" data-ng-click="addBgpNeighbor(machine)">Add
 											Neighbor</span>
 										<span class="btn btn-danger" data-ng-click="removeBgpNeighbor(machine)"
@@ -637,11 +643,12 @@
 						</tr>
 
 						<!-- BGP POLICIES of the router above (full width) -->
-						<tr data-ng-repeat-end data-ng-show="machine.type == 'router' && machine.routing.bgp.en">
+						<tr data-ng-repeat-end data-ng-show="hasPolicies(machine)">
 							<td colspan="4" class="bgp-policies">
-								<div data-ng-if="machine.type == 'router' && machine.routing.bgp.en"
+								<div data-ng-if="hasPolicies(machine)"
 									data-ng-init="newPolicy = {type: 'prefix-list'}">
-									<label>BGP policies of {{machine.name || 'machine ' + machine.row}}</label>
+									<label>Routing policies of {{machine.name || 'machine ' + machine.row}}</label>
+									<p class="policy-note">Used by the BGP neighbors and by the redistribute statements of RIP, OSPF and BGP (route-map dropdown next to each one).</p>
 									<p class="policy-note">
 										Rules are evaluated by increasing sequence number and the first matching rule wins.
 										Every prefix-list, access-list, as-path access-list and route-map ends with an
@@ -732,9 +739,13 @@
 															data-ng-change="m.value = null"
 															data-ng-options="d.match as d.match for d in ROUTE_MAP_MATCHES"></select>
 														<select class="form-control" title="list" data-ng-model="m.value"
+															data-ng-if="matchListType(m.match)"
 															data-ng-options="p.id as p.name for p in policiesOfType(machine, matchListType(m.match))">
 															<option value="">choose a {{matchListType(m.match)}}</option>
 														</select>
+														<input type="text" class="form-control" title="value" required
+															data-ng-if="!matchListType(m.match)" placeholder="{{matchPlaceholder(m.match)}}"
+															data-ng-model="m.value" />
 														<button type="button" class="btn btn-danger btn-sm" title="remove match"
 															data-ng-click="rule.matches.splice($index, 1)">&times;</button>
 													</div>
@@ -762,6 +773,7 @@
 										</div>
 									</div>
 
+									<div data-ng-show="machine.routing.bgp.en">
 									<h4 class="policy-type">Policies applied to the neighbors</h4>
 									<p class="policy-note">
 										At most one policy of each kind per direction: a second one would overwrite the first.
@@ -824,9 +836,10 @@
 										routes coming from the same neighbor AS and is not passed on to other ASes. Custom sets the values
 										(local-pref empty = the value of the policy model).
 									</p>
+									</div>
 
 									<!-- generated by the AS relationships, the policy model and the preferences -->
-									<div class="auto-policies" data-ng-show="auto[mIdx].length">
+									<div class="auto-policies" data-ng-show="machine.routing.bgp.en && auto[mIdx].length">
 										<h4 class="policy-type">Auto-generated policies
 											<button type="button" class="btn btn-success btn-sm"
 												data-ng-click="applyAllAuto(auto[mIdx])">Apply all</button>

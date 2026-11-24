@@ -163,6 +163,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.NEIGHBOR_POLICY_CMDS = NEIGHBOR_POLICY_CMDS;
 	$scope.ROUTE_MAP_MATCHES = ROUTE_MAP_MATCHES;
 	$scope.ROUTE_MAP_SETS = ROUTE_MAP_SETS;
+	$scope.REDISTRIBUTE = REDISTRIBUTE;
 	$scope.DIRECTIONS = ["in", "out"];
 
 	// networks and neighbor IPs offered by the <datalist>s, auto-generated policies and lab problems,
@@ -259,7 +260,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	// one route-map per direction: the manual one goes (deleted too if nothing else uses it), the generated one is applied
 	$scope.replaceManual = function (machine, s) {
 		let bgp = machine.routing.bgp, manual = s.conflict;
-		let alone = policyReferences(bgp, manual).length == 1;
+		let alone = policyReferences(machine.routing, manual).length == 1;
 		if (!confirm("Remove route-map " + manual.name + " from neighbor " + s.remote.neighbor + " " + s.dir
 			+ (alone ? " and delete it (nothing else uses it)" : "") + ", then apply " + s.policy.name + "?")) return;
 		s.remote.apply["route-map"][s.dir] = null;
@@ -281,7 +282,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	};
 
 	$scope.removePolicy = function (machine, policy) {
-		let refs = policyReferences(machine.routing.bgp, policy);
+		let refs = policyReferences(machine.routing, policy);
 		if (refs.length) {
 			alert("Cannot delete " + policy.type + " " + policy.name + ", it is used by:\n- " + refs.join("\n- ") + "\nRemove these references first.");
 		} else if (confirm("Are you sure you want to remove the " + policy.type + " " + policy.name + "?")) {
@@ -319,7 +320,14 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.policyRuleWarning = policyRuleWarning;
 	$scope.policyRuleExplain = (machine, policy, rule) => policyRuleExplain(machine.routing.bgp.policies, policy, rule);
 	$scope.neighborPolicyError = neighborPolicyError;
-	$scope.matchListType = match => ROUTE_MAP_MATCHES.find(d => d.match == match).type;
+	$scope.matchListType = match => matchDef({ match: match }).type;
+	$scope.matchPlaceholder = match => matchDef({ match: match }).placeholder;
+	// the policies row of a router: route-maps are used by BGP neighbors and by redistribute statements
+	$scope.hasPolicies = m => m.type == "router" && (m.routing.bgp.en || m.routing.rip.en || m.routing.ospf.en);
+	// unticking a redistribute statement also drops its route-map, so it no longer blocks deleting the route-map
+	$scope.redistToggle = function (cfg, src) {
+		if (!cfg[src] && cfg.rmap) cfg.rmap[src] = null;
+	};
 	$scope.setPlaceholder = set => ROUTE_MAP_SETS.find(d => d.set == set).placeholder;
 
 	/* ---------- BGP Mode in the Topology tab (logic in bgp-sim.js) ---------- */
