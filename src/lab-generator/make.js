@@ -297,7 +297,7 @@ function makeRouterQuagga(machine, lab, bgpAs) {
 			//nb: i costi vanno qui alla fine
 			if (machine.routing.ospf.en) {
 				for (let interface of machine.routing.ospf.if) {
-					if (interface.cost != "" && interface.cost) {
+					if (interface && interface.cost != "" && interface.cost) {	// null: no cost on that interface (sparse array from the form)
 						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "interface eth" + interface.interface + "\n";
 						lab.file[machine.name + "/etc/zebra/ospfd.conf"] += "\tospf cost " + interface.cost + "\n";
 					}

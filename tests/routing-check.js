@@ -262,4 +262,36 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	assert.equal(ctx.routingSimRib(sim, "b1").rows.find(x => x.prefix == "20.1.0.0/24").pitfall, t.hops[1].pitfall);
 }
 
+/* examples/example_routing.config: every router reaches every address, there and back */
+{
+	const text = fs.readFileSync(path.join(root, "examples/example_routing.config"), "latin1");
+	const l = JSON.parse(text.substring(text.indexOf("[")))[0];
+	l.netkit.forEach(ctx.migrateBgpPolicies);
+	ctx.migrateBgpAs(l.labInfo);
+	assert.deepEqual(lint(l), [], "Check Lab finds nothing in the example");
+	const f = files(l);
+	assert.ok(f["a1.startup"].includes("ip address add 1.1.1.1/32 dev lo:0\n"));
+	assert.ok(f["a1/etc/frr/frr.conf"].includes("\tredistribute connected\n\tredistribute bgp route-map eBGP\n"));
+	assert.ok(f["b1/etc/frr/frr.conf"].includes("\tredistribute connected route-map connected-e1\n\tredistribute bgp route-map eBGP\n"));
+	assert.ok(f["b1/etc/frr/frr.conf"].includes("\tneighbor 2.2.2.2 remote-as 200\n\tneighbor 2.2.2.2 update-source 2.2.2.1\n\tneighbor 2.2.2.2 next-hop-self\n\tneighbor 2.2.2.2 description router b2 (iBGP)\n"));
+	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
+	assert.ok(sim.converged && sim.sessions.every(s => s.up), sim.sessions.map(s => s.label + ": " + s.why).join("\n"));
+	let pings = 0;
+	for (const M of sim.machines) for (const O of sim.machines) for (const a of O.addrs) {
+		if (O === M) continue;
+		const t = ctx.routingSimTrace(sim, M.name, a.ip), from = ctx.simResolve(M, a.ip);
+		assert.ok(t.delivered, M.name + " -> " + ctx.ipToString(a.ip) + ": " + t.fail);
+		const back = ctx.routingSimTrace(sim, t.end, from.src);
+		assert.ok(back.delivered, t.end + " -> " + ctx.ipToString(from.src) + " (back): " + back.fail);
+		pings++;
+	}
+	assert.equal(pings, 252);
+	// AS 10 to AS 20: RIP across AS 100 (a1 a2 a5, 2 hops), OSPF across AS 200 around the expensive b1-b2 link
+	assert.equal(hops(ctx.routingSimTrace(sim, "s10", ctx.parseIp("20.20.20.1"))), "s10 B-ext, a1 R, a2 R, a5 B-ext, b1 O, b3 O, b2 B-ext > s20");
+	// quagga: an ospf cost only on eth2 leaves null entries in ospf.if (as the form does)
+	l.netkit.forEach(m => m.routingSoftware = "quagga");
+	const q = files(l)["b1/etc/zebra/ospfd.conf"];
+	assert.ok(q.includes("\tredistribute connected route-map connected-e1\n") && q.includes("route-map eBGP permit 10\n") && q.includes("interface eth2\n\tospf cost 50\n"));
+}
+
 console.log("routing-check: all checks passed");
