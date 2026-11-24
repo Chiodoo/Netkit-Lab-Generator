@@ -30,6 +30,7 @@ var LINK_PREFS = [
 ];
 
 var DEFAULT_LOCAL_PREF = { customer: 300, peer: 200, provider: 100 };
+var EBGP_PREFIX_LIST = "myNeighbors", EBGP_ROUTE_MAP = "eBGP";	// the names of the course labs
 var NON_CUSTOMER = "NON-CUSTOMER-ROUTES";
 
 function defaultLinkPref() {
@@ -206,15 +207,90 @@ function autoSessions(machine, bgpAs) {
 	return sessions;
 }
 
-// the bgp section the generator writes: the applied route-maps are added to the manual ones
+/* -------------------- eBGP-only redistribution into the IGP -------------------- */
+
+// "Redistribute eBGP routes into IGP (standard)": FRR redistributes the iBGP routes too, so only the routes whose
+// next hop is on a peering LAN (the subnet of the interface towards an eBGP neighbor) go into RIP/OSPF:
+//   ip prefix-list myNeighbors seq 5 permit <peering LAN> le 32
+//   route-map eBGP permit 10 / match ip next-hop prefix-list myNeighbors
+//   redistribute bgp route-map eBGP (router rip, router ospf)
+// { applicable (BGP + RIP/OSPF + an eBGP neighbor), on, active (written), igps, lans, unreachable, prefixList, routeMap,
+//   policies (the generated ones to add), notes (warnings) }
+function ebgpRedistribution(machine) {
+	let r = machine.routing, bgp = r && r.bgp;
+	let res = { applicable: false, on: false, active: false, igps: [], lans: [], unreachable: [], policies: [], notes: [] };
+	if (machine.type != "router" || !bgp || !bgp.en || !validAsn(bgp.as) || !(r.rip.en || r.ospf.en)) return res;
+	let x = asn(bgp.as);
+	let ebgp = (bgp.remote || []).filter(n => n && parseIp(n.neighbor || "") !== null && validAsn(n.as) && asn(n.as) != x);
+	res.applicable = ebgp.length > 0;
+	res.on = !!bgp.ebgpToIgp;
+	if (!res.applicable || !res.on) return res;
+
+	for (let n of ebgp) {
+		let ip = parseIp(n.neighbor);
+		let i = machine.interfaces.if.find(i => { let c = parseCidr(i.ip || ""); return c && i.eth.domain && cidrContains(c, ip); });
+		if (!i) {
+			res.unreachable.push(n.neighbor);
+			res.notes.push("eBGP neighbor " + n.neighbor + " is not on the subnet of an interface: its peering LAN is not in " + EBGP_PREFIX_LIST + ", its routes are not redistributed");
+			continue;
+		}
+		if (res.lans.indexOf(cidrNetwork(i.ip)) < 0) res.lans.push(cidrNetwork(i.ip));
+	}
+	if (!res.lans.length) {
+		res.notes.push("no peering LAN: nothing is generated");
+		return res;
+	}
+
+	for (let p of ["rip", "ospf"]) {
+		if (!r[p].en) continue;
+		let manual = r[p].bgp && findPolicy(bgp.policies, r[p].rmap && r[p].rmap.bgp, "route-map");
+		if (/^\s*redistribute\s+bgp\b/m.test(r[p].free || ""))
+			res.notes.push("the " + p + " free text already has redistribute bgp: the eBGP-only redistribution is not added to " + p);
+		else if (manual)
+			res.notes.push(p + " redistributes bgp with route-map " + manual.name + ", chosen by hand: it is kept, the eBGP-only redistribution is not added to " + p);
+		else {
+			if (r[p].bgp) res.notes.push("the plain redistribute bgp of " + p + " is replaced by redistribute bgp route-map " + EBGP_ROUTE_MAP + " (eBGP routes only)");
+			res.igps.push(p);
+		}
+	}
+
+	// a policy with the same name: used if it has the same rules, otherwise the generated one gets -AUTO
+	let lines = (p, policies) => sortedRules(p).map(rule => policyRuleLines(policies, p, rule, false)).join("");
+	let place = function (gen, policies) {
+		let twin = bgp.policies.find(p => p.type == gen.type && p.name == gen.name);
+		if (!twin) return gen;
+		if (lines(twin, policies) == lines(gen, policies)) return twin;
+		res.notes.push("there is already a " + gen.type + " called " + gen.name + " with other rules: the generated one is called " + gen.name + "-AUTO");
+		gen.name += "-AUTO";
+		return gen;
+	};
+	res.prefixList = place({ id: "auto-ebgp-prefix-list", type: "prefix-list", name: EBGP_PREFIX_LIST, auto: true,
+		rules: res.lans.map((lan, i) => ({ seq: 5 * (i + 1), action: "permit", prefix: lan, ge: null, le: 32 })) }, bgp.policies);
+	res.routeMap = place({ id: "auto-ebgp-route-map", type: "route-map", name: EBGP_ROUTE_MAP, auto: true,
+		rules: [{ seq: 10, action: "permit", matches: [{ match: "ip next-hop prefix-list", value: res.prefixList.id }], sets: [] }] }, bgp.policies.concat([res.prefixList]));
+	res.policies = [res.prefixList, res.routeMap].filter(p => p.auto);
+	res.active = res.igps.length > 0;
+	return res;
+}
+
+// the lines the eBGP-only redistribution adds to the configuration
+function ebgpRedistributionPreview(machine, red) {
+	if (!red.active) return "";
+	return red.igps.map(p => "router " + p + "\n\tredistribute bgp route-map " + red.routeMap.name + "\n").join("")
+		+ bgpPolicyDefinitions({ policies: [red.prefixList, red.routeMap] }, machine.routingSoftware);
+}
+
+// the bgp section the generator writes: the applied route-maps and the eBGP-only redistribution are added to the manual ones
 function effectiveBgp(machine, bgpAs) {
 	let bgp = machine.routing.bgp;
 	let used = autoSessions(machine, bgpAs).filter(s => s.state == "applied" && !s.conflict);
-	if (!used.length) return bgp;
+	let red = ebgpRedistribution(machine), extra = red.active ? red.policies : [];
+	if (!used.length && !extra.length) return bgp;
 	let policies = bgp.policies.slice();
 	let add = p => { if (p && policies.indexOf(p) < 0) policies.push(p); };
 	used.forEach(s => add(s.uses));
 	used.forEach(s => add(s.policy));
+	extra.forEach(add);
 	let remote = bgp.remote.map(function (r) {
 		let mine = used.filter(s => s.remote === r);
 		if (!mine.length) return r;

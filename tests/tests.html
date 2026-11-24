@@ -39,6 +39,7 @@
 				m.type = "router";
 				m.interfaces.if = spec.ifs.map((x, i) => ({ eth: { number: i, domain: x[0] }, ip: x[1] }));
 				m.interfaces.counter = m.interfaces.if.length;
+				m.routing.bgp.ebgpToIgp = false;	// these labs redistribute bgp into rip as written
 				if (spec.rip) Object.assign(m.routing.rip, { en: true, network: spec.rip, bgp: !!spec.ripBgp });
 				if (spec.as) {
 					let bgp = m.routing.bgp, lists = spec.lists || {}, ids = {};

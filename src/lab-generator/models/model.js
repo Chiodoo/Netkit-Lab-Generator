@@ -82,6 +82,7 @@ var backbone = {
 			as: "",
 			noEbgpRequiresPolicy: false,
 			noNetworkImportCheck: false,
+			ebgpToIgp: true,	// "Redistribute eBGP routes into IGP (standard)", see ebgpRedistribution in bgp-as.js
 			network: [""],
 			connected: false,	// redistribute
 			static: false,

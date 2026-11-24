@@ -79,7 +79,7 @@ function simRouterConfig(M, bgpAs) {
 	}
 	for (let p of ["rip", "ospf", "bgp"]) {
 		if (!r[p].en) continue;
-		for (let x of redistributions(r, p, r.bgp.policies)) if (x.policy) M.warn("route-map " + x.policy.name + " on " + p + " redistribute " + x.src + " is not simulated: the routes are redistributed without it");
+		for (let x of redistributions(M.m, p, effectiveBgp(M.m, bgpAs).policies)) if (x.policy) M.warn("route-map " + x.policy.name + " on " + p + " redistribute " + x.src + " is not simulated: the routes are redistributed without it");
 	}
 	for (let p of ["rip", "ospf"]) {
 		if (!r[p].en) continue;
@@ -336,10 +336,12 @@ function simIgp(machines, proto) {
 		R.igpIf = R.igpIf || {};
 		R.igpIf[proto] = R.addrs.filter(a => a.up && nets.some(c => simContains(simNet(c), a.ip)));
 		let own = {}, put = c => own[simKey(c)] = c;
+		let srcs = redistributions(R.m, proto, (R.eff || R.m.routing.bgp).policies).filter(x => !x.missing).map(x => x.src);
 		R.igpIf[proto].forEach(a => put(a.c));
-		if (cfg.connected) R.addrs.filter(a => a.up).forEach(a => put(a.c));
-		if (cfg.bgp) for (let k in R.best || {}) if (!R.best[k].local) put(R.best[k].prefix);
-		if (cfg[other]) for (let k in (R.igp && R.igp[other]) || {}) put(R.igp[other][k].c);
+		if (srcs.indexOf("connected") >= 0) R.addrs.filter(a => a.up).forEach(a => put(a.c));
+		if (srcs.indexOf("static") >= 0) R.statics.forEach(s => put(s.c));
+		if (srcs.indexOf("bgp") >= 0) for (let k in R.best || {}) if (!R.best[k].local) put(R.best[k].prefix);
+		if (srcs.indexOf(other) >= 0) for (let k in (R.igp && R.igp[other]) || {}) put(R.igp[other][k].c);
 		if (proto == "rip") for (let x of cfg.route || []) { let c = parseCidr(x || ""); if (c) put(simNet(c)); }
 		R.igpOwn = R.igpOwn || {};
 		R.igpOwn[proto] = own;

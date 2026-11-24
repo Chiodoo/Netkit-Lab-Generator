@@ -652,6 +652,18 @@
 												default-originate
 											</p>
 										</div>
+										<div data-ng-if="ebgpRed[mIdx].applicable">
+											<label class="plain" title="FRR redistributes the iBGP routes too: only the routes whose next hop is on a peering LAN go into RIP/OSPF">
+												<input type="checkbox" data-ng-model="machine.routing.bgp.ebgpToIgp" />
+												Redistribute eBGP routes into IGP (standard)</label>
+											<div data-ng-show="machine.routing.bgp.ebgpToIgp">
+												<p class="policy-warning" data-ng-repeat="n in ebgpRed[mIdx].notes track by $index">{{n}}</p>
+												<div data-ng-show="ebgpRed[mIdx].preview">
+													<small class="policy-note">Auto-generated from the eBGP neighbors and the interfaces (read-only):</small>
+													<pre class="auto-preview">{{ebgpRed[mIdx].preview}}</pre>
+												</div>
+											</div>
+										</div>
 										<p class="policy-hint">Prefix-lists, access-lists, route-maps and their use on the neighbors: see the row below this machine.</p>
 										<div>
 											<label data-ng-show="machine.routingSoftware == 'quagga'">Directly in bgpd.conf:</label>

@@ -175,6 +175,8 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 		$scope.auto = netkit.map(m => m.type == "router" && m.routing.bgp.en ? autoSessions(m, bgpAs) : []);
 		$scope.auto.forEach((list, i) => list.forEach(s => s.explain = autoExplain(netkit[i], s)));
 		$scope.autoPreview = netkit.map((m, i) => $scope.auto[i].length ? autoPreview(m, $scope.auto[i]) : "");
+		$scope.ebgpRed = netkit.map(m => m.type == "router" ? ebgpRedistribution(m) : {});
+		$scope.ebgpRed.forEach((red, i) => red.preview = red.active ? ebgpRedistributionPreview(netkit[i], red) : "");
 		$scope.issues = lintLab(netkit, bgpAs);
 		$scope.asIssueList = bgpAsIssues(netkit, bgpAs);	// with the quiet ones, hidden in Check Lab
 		$scope.lintErrors = $scope.issues.filter(i => i.level == "error").length;

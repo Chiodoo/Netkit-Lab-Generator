@@ -109,18 +109,18 @@ function makeRouterFrr(machine, lab, bgpAs) {
 			//creiamo il file di vtysh
 			lab.file[machine.name+"/etc/frr/vtysh.conf"]="service integrated-vtysh-config";
 			if (machine.routing.rip.en) {
-				makeRouterRipFrr(machine, lab);
+				makeRouterRipFrr(machine, lab, bgpAs);
 			}
 
 			if (machine.routing.ospf.en) {
-				makeRouterOspfFrr(machine, lab);
+				makeRouterOspfFrr(machine, lab, bgpAs);
 			}
 
 			if (machine.routing.bgp.en) 
 				makeBgpConfFrr(machine, lab, bgpAs);
 			else {
 				// without bgp: only the route-maps of the redistribute statements (and their lists)
-				let used = redistributePolicies(machine.routing, ["rip", "ospf"].filter(p => machine.routing[p].en), machine.routing.bgp.policies);
+				let used = redistributePolicies(machine, ["rip", "ospf"].filter(p => machine.routing[p].en), effectiveBgp(machine, bgpAs).policies);
 				if (used.length) lab.file[machine.name + "/etc/frr/frr.conf"] += bgpPolicyDefinitions({ policies: used }, "frr").replace(/^!\n\n/, "") + "\n";
 			}
 
@@ -143,7 +143,7 @@ function makeRouterFrr(machine, lab, bgpAs) {
 		}
 }
 
-function makeRouterRipFrr(machine, lab){
+function makeRouterRipFrr(machine, lab, bgpAs){
 	lab.file[machine.name + "/etc/frr/daemons"] += "ripd=yes\n";
 
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "router rip\n";
@@ -158,7 +158,7 @@ function makeRouterRipFrr(machine, lab){
 	}
 
 	//nb: mantenere l'ordine (REDISTRIBUTE in bgp-policy.js)
-	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine.routing, "rip", machine.routing.bgp.policies);
+	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine, "rip", effectiveBgp(machine, bgpAs).policies);
 
 	//Free conf
 	if (machine.routing.rip.free && machine.routing.rip.free != "")
@@ -166,7 +166,7 @@ function makeRouterRipFrr(machine, lab){
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "\n";
 }
 
-function makeRouterOspfFrr(machine, lab){
+function makeRouterOspfFrr(machine, lab, bgpAs){
 	lab.file[machine.name + "/etc/frr/daemons"] += "ospfd=yes\n";
 	lab.file[machine.name + "/etc/frr/frr.conf"] += "router ospf\n";
 	for (let m /* non trasformare in un for... of */ in machine.routing.ospf.network) {
@@ -175,7 +175,7 @@ function makeRouterOspfFrr(machine, lab){
 		if (machine.routing.ospf.stub[m] && machine.routing.ospf.stub[m]!="")
 			lab.file[machine.name + "/etc/frr/frr.conf"] += "\tarea " + machine.routing.ospf.area[m] + " stub\n";
 	}
-	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine.routing, "ospf", machine.routing.bgp.policies);
+	lab.file[machine.name + "/etc/frr/frr.conf"] += redistributeLines(machine, "ospf", effectiveBgp(machine, bgpAs).policies);
 
 	//Free conf
 	if (machine.routing.ospf.free && machine.routing.ospf.free != "")
@@ -203,7 +203,7 @@ function makeBgpConfFrr(router, lab, bgpAs) {
 			lab.file[router.name + "/etc/frr/frr.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
-	lab.file[router.name + "/etc/frr/frr.conf"] += redistributeLines(router.routing, "bgp", bgp.policies);
+	lab.file[router.name + "/etc/frr/frr.conf"] += redistributeLines(router, "bgp", bgp.policies);
 
 	router.routing.bgp.remote.forEach(function (remote) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
@@ -289,9 +289,9 @@ function makeRouterQuagga(machine, lab, bgpAs) {
 			//the route-maps of its redistribute statements (and their lists) are defined there too
 			for (let p of ["rip", "ospf"]) {
 				if (!machine.routing[p].en) continue;
-				let file = machine.name + "/etc/zebra/" + p + "d.conf", policies = machine.routing.bgp.policies;
-				lab.file[file] += redistributeLines(machine.routing, p, policies)
-					+ bgpPolicyDefinitions({ policies: redistributePolicies(machine.routing, [p], policies) }, "quagga");
+				let file = machine.name + "/etc/zebra/" + p + "d.conf", policies = effectiveBgp(machine, bgpAs).policies;
+				lab.file[file] += redistributeLines(machine, p, policies)
+					+ bgpPolicyDefinitions({ policies: redistributePolicies(machine, [p], policies) }, "quagga");
 			}
 
 			//nb: i costi vanno qui alla fine
@@ -343,7 +343,7 @@ function makeBgpConfQuagga(router, lab, bgpAs) {
 			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tnetwork " + network + "\n";
 		}
 	}
-	lab.file[router.name + "/etc/zebra/bgpd.conf"] += redistributeLines(router.routing, "bgp", bgp.policies);
+	lab.file[router.name + "/etc/zebra/bgpd.conf"] += redistributeLines(router, "bgp", bgp.policies);
 
 	lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\n";
 

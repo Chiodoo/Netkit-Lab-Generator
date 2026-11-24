@@ -58,6 +58,7 @@ function migrateBgpPolicies(machine) {
 	let bgp = machine && machine.routing && machine.routing.bgp;
 	if (!bgp) return;
 	if (!Array.isArray(bgp.policies)) bgp.policies = [];
+	if (bgp.ebgpToIgp === undefined) bgp.ebgpToIgp = false;	// configurations from before it existed keep their behavior
 	for (let remote of bgp.remote || []) {
 		if (remote && !remote.apply) remote.apply = emptyApply();
 		if (remote && !remote.pref) remote.pref = defaultLinkPref();
@@ -116,6 +117,11 @@ function parseCidr(s) {
 	let len = +parts[1];
 	let mask = len == 0 ? 0 : (0xFFFFFFFF << (32 - len)) >>> 0;
 	return { addr: addr, len: len, net: (addr & mask) >>> 0 };
+}
+
+function cidrContains(c, ip) {
+	let mask = c.len == 0 ? 0 : (0xFFFFFFFF << (32 - c.len)) >>> 0;
+	return ((ip & mask) >>> 0) == c.net;
 }
 
 function cidrNetwork(s) {
@@ -381,27 +387,30 @@ function bgpPolicyDefinitions(bgp, routingSoftware) {
 
 /* -------------------- redistribution -------------------- */
 
-// the redistribute statements of a routing block (rip, ospf, bgp): [{ src, policy (route-map or null), missing }]
+// the redistribute statements of a routing block (rip, ospf, bgp) of a machine: [{ src, policy (route-map or null), missing, auto }]
 // missing: a route-map is chosen but does not exist or has an invalid name, the statement is skipped
-function redistributions(routing, proto, policies) {
-	let cfg = routing[proto];
-	return REDISTRIBUTE[proto].filter(src => cfg[src]).map(function (src) {
+// auto: redistribute bgp with the route-map of the eBGP-only redistribution (ebgpRedistribution in bgp-as.js)
+function redistributions(machine, proto, policies) {
+	let cfg = machine.routing[proto], red = proto != "bgp" && ebgpRedistribution(machine);
+	let auto = red && red.active && red.igps.indexOf(proto) >= 0;
+	return REDISTRIBUTE[proto].filter(src => cfg[src] || (auto && src == "bgp")).map(function (src) {
+		if (auto && src == "bgp") return { src: src, policy: red.routeMap, missing: false, auto: true };
 		let id = cfg.rmap && cfg.rmap[src], policy = findPolicy(policies, id, "route-map");
 		return { src: src, policy: policy, missing: hasValue(id) && (!policy || !!policyNameError(policy)) };
 	});
 }
 
-function redistributeLines(routing, proto, policies) {
-	return redistributions(routing, proto, policies).map(r => r.missing
+function redistributeLines(machine, proto, policies) {
+	return redistributions(machine, proto, policies).map(r => r.missing
 		? "\t! redistribute " + r.src + " skipped: its route-map is missing or has an invalid name\n"
 		: "\tredistribute " + r.src + (r.policy ? " route-map " + r.policy.name : "") + "\n").join("");
 }
 
 // the route-maps of the redistribute statements of the given blocks and the lists they match on
-function redistributePolicies(routing, protos, policies) {
+function redistributePolicies(machine, protos, policies) {
 	let used = [], add = p => { if (p && used.indexOf(p) < 0) used.push(p); };
 	for (let proto of protos) {
-		for (let r of redistributions(routing, proto, policies)) {
+		for (let r of redistributions(machine, proto, policies)) {
 			if (!r.policy || r.missing) continue;
 			for (let rule of r.policy.rules) for (let m of rule.matches) if (matchDef(m) && matchDef(m).type) add(findPolicy(policies, m.value, matchDef(m).type));
 			add(r.policy);
