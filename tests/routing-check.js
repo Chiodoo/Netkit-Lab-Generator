@@ -220,6 +220,13 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs), s = session(sim, "b1", "b2");
 	assert.ok(!s.up);
 	assert.match(s.why, /has no route (back )?to 2.2.2.2.*a loopback: does the IGP carry it\?/);
+	const reach = ctx.routingSimReachability(sim);
+	// reachability: b2's subnets are not in RIP, x2 reaches AS 100 but the replies to 60.2.0.1 are lost
+	assert.deepEqual([reach.count, reach.total], [{ ok: 31, oneway: 3, fail: 14 }, 48]);
+	const cell = (from, ip) => reach.rows.find(r => r.m == from).cells[reach.cols.findIndex(c => c.label == ip)];
+	assert.equal(cell("x2", "100.0.1.2").text, "x2 \u2192 i1 eth0 100.0.1.2: delivered to i1, the reply to 60.2.0.1 is lost: i1 has no route to 60.2.0.1");
+	assert.equal(cell("b1", "2.2.2.2").status, "fail");
+	assert.equal(cell("b2", "2.2.2.2").status, "self");
 }
 
 // eBGP-only redistribution: the iBGP routes are not redistributed
@@ -276,16 +283,9 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	assert.ok(f["b1/etc/frr/frr.conf"].includes("\tneighbor 2.2.2.2 remote-as 200\n\tneighbor 2.2.2.2 update-source 2.2.2.1\n\tneighbor 2.2.2.2 next-hop-self\n\tneighbor 2.2.2.2 description router b2 (iBGP)\n"));
 	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
 	assert.ok(sim.converged && sim.sessions.every(s => s.up), sim.sessions.map(s => s.label + ": " + s.why).join("\n"));
-	let pings = 0;
-	for (const M of sim.machines) for (const O of sim.machines) for (const a of O.addrs) {
-		if (O === M) continue;
-		const t = ctx.routingSimTrace(sim, M.name, a.ip), from = ctx.simResolve(M, a.ip);
-		assert.ok(t.delivered, M.name + " -> " + ctx.ipToString(a.ip) + ": " + t.fail);
-		const back = ctx.routingSimTrace(sim, t.end, from.src);
-		assert.ok(back.delivered, t.end + " -> " + ctx.ipToString(from.src) + " (back): " + back.fail);
-		pings++;
-	}
-	assert.equal(pings, 252);
+	const reach = ctx.routingSimReachability(sim), bad = [].concat(...reach.rows.map(r => r.cells)).filter(c => c.status == "oneway" || c.status == "fail");
+	assert.deepEqual(bad.map(c => c.text), [], "every machine pings every address");
+	assert.equal(reach.total, 252);
 	// AS 10 to AS 20: RIP across AS 100 (a1 a2 a5, 2 hops), OSPF across AS 200 around the expensive b1-b2 link
 	assert.equal(hops(ctx.routingSimTrace(sim, "s10", ctx.parseIp("20.20.20.1"))), "s10 B-ext, a1 R, a2 R, a5 B-ext, b1 O, b3 O, b2 B-ext > s20");
 	// quagga: an ospf cost only on eth2 leaves null entries in ospf.if (as the form does)

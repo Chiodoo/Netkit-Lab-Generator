@@ -974,6 +974,28 @@ function routingSimQuery(sim, q) {
 	return res;
 }
 
+// ping from every machine to every address of the lab, reply included. The source address is the one of the
+// outgoing interface, as Linux picks it. cells: ok, oneway (the reply is lost), fail, self
+function routingSimReachability(sim) {
+	let cols = [], count = { ok: 0, oneway: 0, fail: 0 };
+	for (let O of sim.machines) for (let a of O.addrs) cols.push({ m: O.name, dev: a.dev, ip: a.ip, label: ipToString(a.ip), first: a === O.addrs[0] });
+	let rows = sim.machines.map(M => ({ m: M.name, cells: cols.map(function (col) {
+		let to = M.name + " \u2192 " + col.m + " " + col.dev + " " + col.label;
+		if (col.m == M.name) return { status: "self", text: to + ": own address" };
+		let t = routingSimTrace(sim, M.name, col.ip), cell;
+		if (!t.delivered) cell = { status: "fail", text: to + ": " + t.fail };
+		else {
+			let out = t.hops.length && M.addrs.find(a => a.domain == t.hops[0].domain && a.up);
+			let back = out ? routingSimTrace(sim, t.end, out.ip) : { fail: "no source address" };
+			cell = back.delivered ? { status: "ok", text: to + ": reply received" }
+				: { status: "oneway", text: to + ": delivered to " + t.end + ", the reply to " + (out ? ipToString(out.ip) : "?") + " is lost: " + back.fail };
+		}
+		count[cell.status]++;
+		return cell;
+	}) }));
+	return { cols: cols, rows: rows, count: count, total: count.ok + count.oneway + count.fail };
+}
+
 // machines whose name starts with text, with their addresses as in the configuration (interfaces, then the
 // startup free text) and the collision domain of each: [{ name, addrs: [{ ip, cidr, dev, domain, peers }] }]
 function routingSimMachineAddresses(sim, text) {

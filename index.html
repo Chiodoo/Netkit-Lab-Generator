@@ -1073,7 +1073,7 @@
 						<label>Source
 							<select class="form-control input-sm" data-ng-model="sim.source" data-ng-change="simRun()">
 								<option value="">All routers</option>
-								<option data-ng-repeat="n in simRouters" value="{{n}}">{{n}}</option>
+								<option data-ng-repeat="n in simMachineNames" value="{{n}}">{{n}}</option>
 							</select>
 						</label>
 						<label>Destination
@@ -1211,6 +1211,29 @@
 					</div>
 					</div>
 
+					<!-- every machine pings every address of the lab (the reply too): click a cell for hop by hop -->
+					<details class="routing-sim-reach" data-ng-if="simReach.total">
+						<summary>Reachability: <span class="reach-ok-text">{{simReach.count.ok}} answered</span>,
+							<span>{{simReach.count.oneway}} one-way</span>, <span class="reach-fail-text">{{simReach.count.fail}} unreachable</span>
+							of {{simReach.total}} pings</summary>
+						<p class="text-muted">
+							<span class="reach-cell reach-ok">&#10003;</span> reply received
+							<span class="reach-cell reach-oneway">&rarr;</span> delivered, reply lost
+							<span class="reach-cell reach-fail">&#10007;</span> not delivered
+							<span class="reach-cell reach-self">&middot;</span> own address
+							&middot; rows: source, columns: destination address. Hover a cell for the reason, click it for hop by hop.</p>
+						<div class="reach-scroll">
+						<table>
+							<tr><th></th><th data-ng-repeat="c in simReach.cols" data-ng-class="{ 'reach-first': c.first }" title="{{c.m}} {{c.dev}} {{c.label}}">
+								<span>{{c.m}} {{c.dev}}</span></th></tr>
+							<tr data-ng-repeat="r in simReach.rows">
+								<th>{{r.m}}</th>
+								<td data-ng-repeat="x in r.cells track by $index" class="reach-cell reach-{{x.status}}" data-ng-class="{ 'reach-first': simReach.cols[$index].first }"
+									title="{{x.text}}" data-ng-click="x.status != 'self' && simPing(r.m, simReach.cols[$index].label)">{{ {ok: '\u2713', oneway: '\u2192', fail: '\u2717', self: '\u00b7'}[x.status] }}</td>
+							</tr>
+						</table>
+						</div>
+					</details>
 					<details>
 						<summary>Sessions ({{simResult.sessions.length}}, {{simSessionsDown()}} down): mark one down to test the backup</summary>
 						<div data-ng-repeat="s in simResult.sessions">

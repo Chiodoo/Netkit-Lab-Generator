@@ -364,12 +364,14 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.simRun = function () {
 		let s = $scope.sim;
 		if (!s.on) {
-			$scope.simResult = $scope.simView = $scope.simTable = $scope.simRib = null;
+			$scope.simResult = $scope.simView = $scope.simTable = $scope.simRib = $scope.simReach = null;
 			routingHighlight(null);
 			return;
 		}
 		let r = $scope.simResult = routingSimulate($scope.netkit, $scope.labInfo.bgpAs, { down: s.down });
 		$scope.simRouters = r.machines.filter(M => M.router).map(M => M.name);
+		$scope.simMachineNames = r.machines.map(M => M.name);
+		$scope.simReach = routingSimReachability(r);
 		$scope.simDomains = [].concat(...r.machines.map(M => M.addrs.map(a => a.domain))).filter((d, i, a) => d && a.indexOf(d) == i).sort();
 		$scope.simView = routingSimQuery(r, s);
 		$scope.simTable = s.selected && r.byName[s.selected] && r.byName[s.selected].eff ? bgpSimTable(r, s.selected) : null;
@@ -400,6 +402,13 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 
 	$scope.simTraceSource = function (name) {
 		$scope.sim.source = name;
+		$scope.simRun();
+	};
+
+	// a cell of the reachability matrix: hop by hop from its machine to its address
+	$scope.simPing = function (name, ip) {
+		$scope.sim.source = name;
+		$scope.sim.dest = ip;
 		$scope.simRun();
 	};
 

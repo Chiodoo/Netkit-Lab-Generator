@@ -323,6 +323,60 @@ button {
 	overflow-x: auto;
 }
 
+/* reachability matrix: Okabe-Ito colors (colorblind safe) and a glyph in every cell */
+.routing-sim-reach .reach-scroll {
+	overflow: auto;
+	max-height: 60vh;
+}
+
+.routing-sim-reach table {
+	border-collapse: collapse;
+}
+
+.routing-sim-reach th {
+	font-weight: normal;
+	white-space: nowrap;
+	padding: 0 4px 0 0;
+}
+
+/* machine names stay visible while scrolling */
+.routing-sim-reach tr > th:first-child {
+	position: sticky;
+	left: 0;
+	background: #fff;
+}
+
+.routing-sim-reach tr:first-child th span {
+	writing-mode: vertical-rl;
+	transform: rotate(180deg);
+}
+
+.routing-sim .reach-cell {
+	display: inline-block;
+	min-width: 16px;
+	height: 16px;
+	line-height: 16px;
+	text-align: center;
+	border: 1px solid #fff;
+	font-weight: bold;
+}
+
+.routing-sim-reach td.reach-cell {
+	display: table-cell;
+	cursor: pointer;
+}
+
+.routing-sim-reach .reach-first {
+	border-left: 2px solid #555;
+}
+
+.reach-ok { background: #0072B2; color: #fff; }
+.reach-oneway { background: #F0E442; color: #000; }
+.reach-fail { background: #D55E00; color: #fff; }
+.reach-self { background: #e5e5e5; color: #555; cursor: default !important; }
+.reach-ok-text { color: #0072B2; }
+.reach-fail-text { color: #D55E00; }
+
 .routing-sim .bgp-table td:last-child,
 .routing-sim .bgp-table td.wrap {
 	font-family: inherit;
