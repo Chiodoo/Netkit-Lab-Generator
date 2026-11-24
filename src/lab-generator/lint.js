@@ -199,10 +199,17 @@ function lintLab(netkit, bgpAs) {
 			if (!on[p]) continue;
 			if (!r[p].network.some(x => x)) add("warning", idx, n + ": " + p + " is enabled but has no network");
 			lintNetworks(m, idx, p, r[p].network);
-			for (let other of ["rip", "ospf", "bgp"]) {
-				if (r[p][other] && !on[other]) add("warning", idx, n + ": " + p + " redistributes " + other + ", which is not enabled");
-			}
 		}
+		for (let p of ["rip", "ospf", "bgp"]) {
+			if (!on[p]) continue;
+			for (let other of ["rip", "ospf", "bgp"]) {
+				if (other != p && r[p][other] && !on[other]) add("warning", idx, n + ": " + p + " redistributes " + other + ", which is not enabled");
+			}
+			lintRedistribute(m, idx, p);
+		}
+		if (on.rip || on.ospf || on.bgp) lintPolicies(m, idx);
+		if (on.bgp) lintEbgpRedistribution(m, idx);
+		lintLoopbackIgp(m, idx);
 		if (on.rip) {
 			for (let route of r.rip.route || []) {
 				if (route && networkError(route)) add("error", idx, n + " rip route: " + networkError(route));
@@ -227,6 +234,68 @@ function lintLab(netkit, bgpAs) {
 			}
 		}
 		if (on.bgp) lintBgp(m, idx);
+	}
+
+	// the route-maps of the redistribute statements
+	function lintRedistribute(m, idx, p) {
+		let n = name(m), cfg = m.routing[p], policies = effectiveBgp(m, bgpAs).policies;
+		for (let src of REDISTRIBUTE[p]) {
+			let id = cfg.rmap && cfg.rmap[src], what = n + " " + p + " redistribute " + src;
+			if (!cfg[src] || !hasValue(id)) continue;
+			let rm = findPolicy(policies, id, "route-map");
+			if (!rm) {
+				let other = netkit.find(o => o !== m && o.type == "router" && findPolicy(o.routing.bgp.policies, id, "route-map"));
+				add("error", idx, what + ": the route-map " + (other ? findPolicy(other.routing.bgp.policies, id, "route-map").name + " belongs to " + name(other)
+					+ " (a router uses only its own policies)" : "no longer exists") + ", the statement is not generated");
+				continue;
+			}
+			if (p == "bgp") continue;
+			let useless = [].concat(...rm.rules.map(rule => rule.matches.map(x => "match " + x.match).filter(x => x == "match as-path")
+				.concat(rule.sets.map(s => "set " + s.set).filter(s => /local-preference|as-path prepend|community/.test(s) || (p == "rip" && s == "set metric-type")))));
+			if (useless.length)
+				add("warning", idx, what + ": route-map " + rm.name + " has " + useless.filter((x, i, a) => a.indexOf(x) == i).join(", ") + ", which " + p.toUpperCase()
+					+ " does not use" + (m.routingSoftware == "quagga" ? " (Quagga " + p + "d rejects the line)" : ""));
+		}
+	}
+
+	function lintPolicies(m, idx) {
+		let n = name(m), bgp = m.routing.bgp;
+		for (let policy of bgp.policies || []) {
+			let what = n + " " + policy.type + " " + (policy.name || "(no name)");
+			let err = policyError(bgp.policies, policy);
+			if (err) add("error", idx, what + ": " + err);
+			else if (policyWarning(policy)) add("warning", idx, what + ": " + policyWarning(policy));
+			for (let rule of policy.rules) {
+				err = policyRuleError(bgp.policies, policy, rule);
+				if (err) add("error", idx, what + " seq " + rule.seq + ": " + err);
+				else if (policyRuleWarning(policy, rule)) add("warning", idx, what + " seq " + rule.seq + ": " + policyRuleWarning(policy, rule));
+			}
+		}
+	}
+
+	// "Redistribute eBGP routes into IGP (standard)": what it cannot do
+	function lintEbgpRedistribution(m, idx) {
+		let n = name(m), r = m.routing, red = ebgpRedistribution(m);
+		if (red.applicable && red.on) red.notes.forEach(t => add("warning", idx, n + " eBGP-only redistribution: " + t));
+		let plain = ["rip", "ospf"].filter(p => r[p].en && r[p].bgp && !hasValue(r[p].rmap && r[p].rmap.bgp));
+		if (!red.applicable && r.bgp.ebgpToIgp && plain.length)
+			add("warning", idx, n + ": " + plain.join(" and ") + " redistribute" + (plain.length == 1 ? "s" : "") + " bgp, but " + n
+				+ " has no eBGP neighbor: the eBGP-only redistribution does nothing and every BGP route (iBGP too) goes into the IGP");
+	}
+
+	// a loopback used for iBGP must be carried by the IGP, otherwise the session does not come up
+	function lintLoopbackIgp(m, idx) {
+		let lo = loopbackIp(m), r = m.routing;
+		if (!lo) return;
+		let ip = parseIp(lo), n = name(m);
+		let users = (r.bgp.en ? r.bgp.remote : []).filter(x => x && x.neighbor && x.updateSource == lo).map(x => n + " (neighbor " + x.neighbor + ")")
+			.concat(netkit.filter(o => o !== m && isBgp(o) && o.routing.bgp.remote.some(x => x && x.neighbor == lo)).map(o => name(o)));
+		if (!users.length) return;
+		let carried = ["rip", "ospf"].some(p => r[p].en && (r[p].connected
+			|| r[p].network.concat((r[p].free || "").split("\n").map(l => (/^\s*network\s+(\S+)/.exec(l) || [])[1])).some(x => x && parseCidr(x) && inSubnet(ip, parseCidr(x)))));
+		if (!carried)
+			add("warning", idx, n + ": the loopback " + lo + " is used for iBGP by " + users.join(", ") + " but " + (r.rip.en || r.ospf.en
+				? "no rip/ospf network contains it and there is no redistribute connected" : n + " runs no RIP/OSPF") + ": the IGP does not carry it, the session does not come up");
 	}
 
 	function lintBgp(m, idx) {
@@ -254,11 +323,16 @@ function lintLab(netkit, bgpAs) {
 			let err = neighborPolicyError(remote);
 			if (err) add("error", idx, what + ": " + err);
 
+			if (hasValue(remote.updateSource) && !mine.some(a => a.ip == String(remote.updateSource).trim()))
+				add("error", idx, what + ": update-source " + remote.updateSource + " is not an address of " + n);
+			if (remote.loopback && !loopbackIp(m))
+				add("error", idx, what + ": Peer via loopback, but " + n + " has no loopback");
 			let o = ownerOf(ip), peer = o && netkit[o.idx];
 			if (!o) {
-				add("error", idx, what + ": no machine has this address");
+				add("error", idx, what + ": no machine has this address" + (remote.loopback ? " (it is not the loopback of any router)" : ""));
 				continue;
 			}
+			if (remote.loopback && o.eth != "lo:0") add("warning", idx, what + ": Peer via loopback, but " + ip + " is " + where(o) + ", not a loopback");
 			if (o.idx == idx) {
 				add("error", idx, what + ": this is an address of " + n + " itself");
 				continue;
@@ -280,6 +354,11 @@ function lintLab(netkit, bgpAs) {
 				add("warning", idx, what + ": " + name(peer) + " peers with " + back.neighbor + ", but " + n + " reaches it from " + towards[0].ip);
 
 			let ebgp = remote.as != bgp.as;
+			// next-hop-self: the routes learned via eBGP would be announced with a next hop on the peering LAN
+			let viaLo = o.eth == "lo:0" || (loopbackIp(m) && remote.updateSource == loopbackIp(m));
+			if (!ebgp && viaLo && !remote.nextHopSelf && !new RegExp("neighbor " + ip.replace(/\./g, "\\.") + " next-hop-self").test(free)
+				&& bgp.remote.some(x => x && x.neighbor && validAsn(x.as) && validAsn(bgp.as) && asn(x.as) != asn(bgp.as)))
+				add("warning", idx, what + ": iBGP session between loopbacks without next-hop-self: " + name(peer) + " gets the routes learned via eBGP with their peering LAN as next hop, reachable only if the IGP carries it");
 			if (ebgp && !towards.length && free.indexOf("ebgp-multihop") < 0)
 				add("warning", idx, what + " (" + where(o) + ") does not share a collision domain with " + n + ": an eBGP session needs ebgp-multihop");
 			if (ebgp && frr && !bgp.noEbgpRequiresPolicy && free.indexOf("no bgp ebgp-requires-policy") < 0) {
@@ -293,17 +372,6 @@ function lintLab(netkit, bgpAs) {
 			}
 		}
 
-		for (let policy of bgp.policies || []) {
-			let what = n + " " + policy.type + " " + (policy.name || "(no name)");
-			let err = policyError(bgp.policies, policy);
-			if (err) add("error", idx, what + ": " + err);
-			else if (policyWarning(policy)) add("warning", idx, what + ": " + policyWarning(policy));
-			for (let rule of policy.rules) {
-				err = policyRuleError(bgp.policies, policy, rule);
-				if (err) add("error", idx, what + " seq " + rule.seq + ": " + err);
-				else if (policyRuleWarning(policy, rule)) add("warning", idx, what + " seq " + rule.seq + ": " + policyRuleWarning(policy, rule));
-			}
-		}
 	}
 
 	issues = issues.concat(bgpAsIssues(netkit, bgpAs).filter(i => !i.quiet));

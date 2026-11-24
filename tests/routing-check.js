@@ -120,4 +120,73 @@ const transit = () => lab({
 	assert.equal(ctx.ebgpRedistribution(b1).notes.filter(n => /-AUTO/.test(n)).length, 2);
 }
 
+/* Check Lab */
+{
+	assert.deepEqual(lint(transit()), [], "the transit lab has no problems");
+	const expect = function (mutate, re) {
+		const l = transit();
+		mutate(l);
+		const found = lint(l);
+		assert.ok(found.some(t => re.test(t)), re + " not found in:\n" + found.join("\n"));
+	};
+	const b1 = l => machine(l, "b1"), ibgp = l => b1(l).routing.bgp.remote[1];
+
+	// loopback
+	expect(l => b1(l).routing.loopback.ip = "1.1.1", /^error: b1: loopback '1.1.1' is not an address/);
+	expect(l => b1(l).routing.loopback.ip = "2.2.2.2", /^error: address 2.2.2.2 is used more than once: b1 lo:0, b2 lo:0/);
+	expect(l => b1(l).routing.loopback.ip = "100.0.1.1", /^error: address 100.0.1.1 is used more than once: b1 eth1, b1 lo:0/);
+	expect(l => b1(l).routing.rip.connected = false, /^warning: b1: the loopback 1.1.1.1 is used for iBGP by b1 \(neighbor 2.2.2.2\), b2 but no rip\/ospf network contains it and there is no redistribute connected/);
+	{	// a network statement or the free text carry it too
+		const l = transit();
+		Object.assign(b1(l).routing.rip, { connected: false, network: ["100.0.0.0/8", "1.1.1.1/32"] });
+		assert.ok(!lint(l).some(t => /loopback 1.1.1.1 is used/.test(t)));
+		Object.assign(b1(l).routing.rip, { network: ["100.0.0.0/8"], free: "\tnetwork 1.1.1.1/32" });
+		assert.ok(!lint(l).some(t => /loopback 1.1.1.1 is used/.test(t)));
+	}
+	expect(l => b1(l).routing.rip.en = false, /^warning: b1: the loopback 1.1.1.1 is used for iBGP by .* b1 runs no RIP\/OSPF/);
+
+	// iBGP over loopbacks
+	expect(l => ibgp(l).neighbor = "9.9.9.9", /^error: b1 neighbor 9.9.9.9: no machine has this address \(it is not the loopback of any router\)/);
+	expect(l => b1(l).routing.loopback.en = false, /^error: b1 neighbor 2.2.2.2: Peer via loopback, but b1 has no loopback/);
+	expect(l => b1(l).routing.loopback.en = false, /^error: b1 neighbor 2.2.2.2: update-source 1.1.1.1 is not an address of b1/);
+	expect(l => ibgp(l).neighbor = "100.0.2.1", /^warning: b1 neighbor 100.0.2.1: Peer via loopback, but 100.0.2.1 is b2 eth1, not a loopback/);
+	expect(l => machine(l, "b2").routing.bgp.remote.pop(), /^error: b1 neighbor 2.2.2.2: b2 has no neighbor statement for b1, the session does not come up/);
+	expect(l => ibgp(l).nextHopSelf = false, /^warning: b1 neighbor 2.2.2.2: iBGP session between loopbacks without next-hop-self/);
+	{	// next-hop-self in the free text, or no eBGP neighbor: nothing to say
+		const l = transit();
+		ibgp(l).nextHopSelf = false;
+		b1(l).routing.bgp.free = "\tneighbor 2.2.2.2 next-hop-self";
+		assert.ok(!lint(l).some(t => /next-hop-self/.test(t)));
+	}
+
+	// route-maps of the redistribute statements
+	const rm = { id: 41, type: "route-map", name: "lp", rules: [{ seq: 10, action: "permit", matches: [], sets: [{ set: "local-preference", value: "200" }, { set: "metric-type", value: "type-1" }] }] };
+	expect(l => Object.assign(b1(l).routing.rip.rmap, { connected: 999 }), /^error: b1 rip redistribute connected: the route-map no longer exists, the statement is not generated/);
+	expect(function (l) {
+		machine(l, "b2").routing.bgp.policies.push(JSON.parse(JSON.stringify(rm)));
+		b1(l).routing.rip.rmap.connected = 41;
+	}, /^error: b1 rip redistribute connected: the route-map lp belongs to b2 \(a router uses only its own policies\)/);
+	expect(function (l) {
+		b1(l).routing.bgp.policies.push(JSON.parse(JSON.stringify(rm)));
+		b1(l).routing.rip.rmap.connected = 41;
+	}, /^warning: b1 rip redistribute connected: route-map lp has set local-preference, set metric-type, which RIP does not use/);
+	{	// policies are checked without BGP too
+		const l = transit();
+		machine(l, "i1").routing.bgp.policies.push({ id: 42, type: "prefix-list", name: "bad name", rules: [] });
+		assert.ok(lint(l).some(t => /^error: i1 prefix-list bad name: name required/.test(t)));
+	}
+
+	// eBGP-only redistribution
+	expect(l => b1(l).routing.rip.bgp = true, /^warning: b1 eBGP-only redistribution: the plain redistribute bgp of rip is replaced/);
+	expect(l => b1(l).routing.rip.free = "redistribute bgp", /^warning: b1 eBGP-only redistribution: the rip free text already has redistribute bgp/);
+	expect(l => b1(l).routing.bgp.remote[0].neighbor = "70.0.0.1", /^warning: b1 eBGP-only redistribution: no peering LAN: nothing is generated/);
+	expect(l => b1(l).routing.bgp.policies.push({ id: 43, type: "route-map", name: "eBGP", rules: [] }), /^warning: b1 eBGP-only redistribution: there is already a route-map called eBGP with other rules/);
+	expect(function (l) {
+		const i1 = machine(l, "i1");
+		Object.assign(i1.routing.bgp, { en: true, as: "100", remote: [Object.assign({}, b1(l).routing.bgp.remote[1], { neighbor: "1.1.1.1", updateSource: "" })] });
+		b1(l).routing.bgp.remote.push(Object.assign({}, b1(l).routing.bgp.remote[1], { neighbor: "100.0.1.2", updateSource: "", loopback: false, nextHopSelf: false }));
+		i1.routing.rip.bgp = true;
+	}, /^warning: i1: rip redistributes bgp, but i1 has no eBGP neighbor: the eBGP-only redistribution does nothing and every BGP route \(iBGP too\) goes into the IGP/);
+}
+
 console.log("routing-check: all checks passed");
