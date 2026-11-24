@@ -249,6 +249,9 @@
 								<datalist id="peers-{{mIdx}}">
 									<option data-ng-repeat="p in suggest.peers[mIdx]" value="{{p.value}}">{{p.label}}</option>
 								</datalist>
+								<datalist id="loopbacks-{{mIdx}}">
+									<option data-ng-repeat="p in suggest.loopbacks[mIdx]" value="{{p.value}}">{{p.label}}</option>
+								</datalist>
 								<datalist id="gateways-{{mIdx}}">
 									<option data-ng-repeat="p in suggest.gateways[mIdx]" value="{{p.value}}">{{p.label}}</option>
 								</datalist>
@@ -617,11 +620,29 @@
 											<label>Neighbor (empty to omit): </label>
 											<input type="text" placeholder="0.0.0.0"
 												pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}$"
-												class="form-control" list="peers-{{mIdx}}"
+												class="form-control" list="{{bremote.loopback ? 'loopbacks-' : 'peers-'}}{{mIdx}}"
+												data-ng-change="fillDescription(mIdx, bremote)"
 												data-ng-model="machine.routing.bgp.remote[$index].neighbor" />
 											<label>Remote-AS: </label>
 											<input type="text" placeholder="0" pattern="^[0-9]*$" class="form-control"
 												data-ng-model="machine.routing.bgp.remote[$index].as" />
+											<p data-ng-show="isIbgp(machine, bremote)">
+												<label class="plain" title="iBGP session between loopbacks: update-source (own loopback) and next-hop-self">
+													<input type="checkbox" data-ng-model="bremote.loopback"
+														data-ng-disabled="!loopbackIp(machine) && !bremote.loopback"
+														data-ng-change="peerViaLoopback(machine, mIdx, bremote)" /> Peer via loopback</label>
+												<small class="policy-note" data-ng-hide="loopbackIp(machine)">(insert a loopback on this router first)</small>
+											</p>
+											<label>Update-source: </label>
+											<select class="form-control" title="update-source"
+												data-ng-model="bremote.updateSource"
+												data-ng-options="o.value as o.label for o in suggest.own[mIdx]">
+												<option value="">-</option>
+											</select>
+											<p>
+												<label class="plain"><input type="checkbox" title="next-hop-self"
+													data-ng-model="bremote.nextHopSelf" /> next-hop-self</label>
+											</p>
 											<label>Description: </label>
 											<input type="text" title="description" class="form-control"
 												data-ng-model="machine.routing.bgp.remote[$index].description" />

@@ -62,6 +62,7 @@ function migrateBgpPolicies(machine) {
 		if (remote && !remote.apply) remote.apply = emptyApply();
 		if (remote && !remote.pref) remote.pref = defaultLinkPref();
 		if (remote && !remote.auto) remote.auto = { in: "", out: "" };
+		if (remote && remote.updateSource === undefined) Object.assign(remote, { updateSource: "", nextHopSelf: false, loopback: false });
 	}
 	if (!machine.routing.loopback || typeof machine.routing.loopback != "object") machine.routing.loopback = { en: false, ip: "" };
 	for (let p in REDISTRIBUTE) {
@@ -311,6 +312,14 @@ function sortedRules(policy) {
 	return policy.rules.slice().sort((a, b) => a.seq - b.seq);
 }
 
+// right after "neighbor ... remote-as", before the description (the order of the course labs)
+function bgpNeighborSessionLines(remote) {
+	let text = "";
+	if (parseIp(remote.updateSource || "") !== null) text += "\tneighbor " + remote.neighbor + " update-source " + String(remote.updateSource).trim() + "\n";
+	if (remote.nextHopSelf) text += "\tneighbor " + remote.neighbor + " next-hop-self\n";
+	return text;
+}
+
 // inside "router bgp": must follow every "neighbor ... remote-as" statement
 function bgpNeighborPolicyLines(bgp) {
 	let text = "";
@@ -432,7 +441,7 @@ function labSuggestions(netkit) {
 	}
 	addNetwork("0.0.0.0/0", "default route");
 
-	let peers = [], gateways = [], loopbacks = [];
+	let peers = [], gateways = [], loopbacks = [], own = [];
 	netkit.forEach(function (m, idx) {
 		let list = [], ips = {};
 		let add = function (ip, label) {
@@ -466,7 +475,10 @@ function labSuggestions(netkit) {
 		}
 		peers.push(list);
 		loopbacks.push(mine);	// loopbacks of the other routers of the same AS
+		// the addresses of the machine itself (update-source)
+		own.push(ifaces(m).filter(i => i.ip && parseIp(i.ip.split("/")[0]) !== null).map(i => ({ value: i.ip.split("/")[0], label: "eth" + i.eth.number + " " + i.ip.split("/")[0] }))
+			.concat(loopbackIp(m) ? [{ value: loopbackIp(m), label: "loopback " + loopbackIp(m) }] : []));
 	});
 
-	return { networks: networks, peers: peers, gateways: gateways, loopbacks: loopbacks };
+	return { networks: networks, peers: peers, gateways: gateways, loopbacks: loopbacks, own: own };
 }

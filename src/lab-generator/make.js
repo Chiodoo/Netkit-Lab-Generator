@@ -209,6 +209,7 @@ function makeBgpConfFrr(router, lab, bgpAs) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
 			//Aggiungo il remote-as
 			lab.file[router.name + "/etc/frr/frr.conf"] += "\tneighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
+			lab.file[router.name + "/etc/frr/frr.conf"] += bgpNeighborSessionLines(remote);
 
 			//Aggiungo la descrizione
 			if ((remote.description) && remote.description != "") {
@@ -350,6 +351,7 @@ function makeBgpConfQuagga(router, lab, bgpAs) {
 		if (remote && remote.neighbor != "" && remote.as != "") {
 			//Aggiungo il remote-as
 			lab.file[router.name + "/etc/zebra/bgpd.conf"] += "\tneighbor " + remote.neighbor + " remote-as " + remote.as + "\n";
+			lab.file[router.name + "/etc/zebra/bgpd.conf"] += bgpNeighborSessionLines(remote);
 
 			//Aggiungo la descrizione
 			if ((remote.description) && remote.description != "") {

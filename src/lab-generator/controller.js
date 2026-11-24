@@ -324,6 +324,28 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.matchPlaceholder = match => matchDef({ match: match }).placeholder;
 	// the policies row of a router: route-maps are used by BGP neighbors and by redistribute statements
 	$scope.graphChanged = () => changed = true;
+
+	/* ---------- iBGP over loopbacks ---------- */
+
+	$scope.loopbackIp = loopbackIp;
+	$scope.isIbgp = (machine, remote) => validAsn(remote.as) && validAsn(machine.routing.bgp.as) && asn(remote.as) == asn(machine.routing.bgp.as);
+	// "router r3 (iBGP)" when the neighbor is the loopback of a router of the AS and there is no description yet
+	$scope.fillDescription = function (mIdx, remote) {
+		let lo = remote.loopback && !remote.description && ($scope.suggest.loopbacks[mIdx] || []).find(l => l.value == remote.neighbor);
+		if (lo) remote.description = "router " + lo.name + " (iBGP)";
+	};
+	// preset: update-source = own loopback and next-hop-self; unticking takes them back
+	$scope.peerViaLoopback = function (machine, mIdx, remote) {
+		let lo = loopbackIp(machine);
+		if (remote.loopback) {
+			remote.updateSource = lo;
+			remote.nextHopSelf = true;
+			$scope.fillDescription(mIdx, remote);
+		} else {
+			if (remote.updateSource == lo) remote.updateSource = "";
+			remote.nextHopSelf = false;
+		}
+	};
 	$scope.hasPolicies = m => m.type == "router" && (m.routing.bgp.en || m.routing.rip.en || m.routing.ospf.en);
 	// unticking a redistribute statement also drops its route-map, so it no longer blocks deleting the route-map
 	$scope.redistToggle = function (cfg, src) {

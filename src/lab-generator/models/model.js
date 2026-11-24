@@ -92,6 +92,9 @@ var backbone = {
 				neighbor: "",
 				as: "",
 				description: "",
+				updateSource: "",	// an address of this router
+				nextHopSelf: false,
+				loopback: false,	// "Peer via loopback": preset of updateSource (own loopback) and nextHopSelf
 				defaultOriginate: false,
 				apply: emptyApply(),	// apply[cmd][in|out] = id of a policy
 				pref: defaultLinkPref(),	// primary/backup of the eBGP session, see bgp-as.js

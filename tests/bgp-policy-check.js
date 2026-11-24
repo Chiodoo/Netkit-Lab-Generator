@@ -187,6 +187,22 @@ assert.ok(!/prefix-list|route-map|access-list/.test(Object.values(lab.file).join
 	assert.ok(s.peers[i2].some(p => p.value == "2.2.2.2" && p.label == "r1 loopback (iBGP)"));
 }
 
+/* iBGP over loopbacks: update-source and next-hop-self right after remote-as, before the description */
+{
+	const cfg = loadConfig("examples/example_bgp_policies.config");
+	const r1 = cfg.netkit.find(m => m.name == "r1");
+	r1.routing.loopback = { en: true, ip: "2.2.2.2" };
+	r1.routing.bgp.remote.push(Object.assign(JSON.parse(JSON.stringify(r1.routing.bgp.remote[0])),
+		{ neighbor: "3.3.3.3", as: r1.routing.bgp.as, description: "router r3 (iBGP)", updateSource: "2.2.2.2", nextHopSelf: true, loopback: true }));
+	const want = ["\tneighbor 3.3.3.3 remote-as " + r1.routing.bgp.as, "\tneighbor 3.3.3.3 update-source 2.2.2.2", "\tneighbor 3.3.3.3 next-hop-self", "\tneighbor 3.3.3.3 description router r3 (iBGP)"].join("\n") + "\n";
+	assert.ok(ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r1/etc/frr/frr.conf"].includes(want));
+	r1.routingSoftware = "quagga";
+	assert.ok(ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r1/etc/zebra/bgpd.conf"].includes(want));
+	// an imported value that is not an address is not written
+	r1.routing.bgp.remote[r1.routing.bgp.remote.length - 1].updateSource = "2.2.2.2\nip route 0.0.0.0/0 1.2.3.4";
+	assert.ok(!/update-source|ip route/.test(ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r1/etc/zebra/bgpd.conf"]));
+}
+
 /* suggestions: r20 peers are the routers on its collision domains */
 const sugg = ctx.labSuggestions(loadConfig("examples/example_bgp_policies.config").netkit);
 const idx = example.netkit.findIndex(m => m.name == "r20");

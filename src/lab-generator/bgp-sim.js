@@ -414,7 +414,10 @@ function simSessions(ms, down) {
 				else if (+asn(back.as) != R.asn) why = O.name + " says remote-as " + asn(back.as) + " but " + R.name + " is in AS " + R.asn;
 				s.staticWhy = why;
 			}
-			let end = { s: s, r: R, remote: remote, peerIp: ip, free: R.nbr[remote.neighbor] || {} };
+			// the fields of the neighbor, then what the free text adds
+			let free = Object.assign({}, parseIp(remote.updateSource || "") !== null ? { updateSource: String(remote.updateSource).trim() } : {},
+				remote.nextHopSelf ? { nextHopSelf: true } : {}, R.nbr[remote.neighbor] || {});
+			let end = { s: s, r: R, remote: remote, peerIp: ip, free: free };
 			s.ends.push(end);
 			R.ends.push(end);
 		}
