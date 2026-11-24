@@ -274,8 +274,8 @@ button {
 	margin: 0;
 }
 
-/* BGP Mode panel in the Topology tab */
-.bgp-sim {
+/* Routing Mode panel in the Topology tab */
+.routing-sim {
 	width: 45%;
 	overflow: auto;
 	padding: 6px 10px;
@@ -285,32 +285,46 @@ button {
 }
 
 /* the global .ng-scope { height: 100% } would make every row as tall as the panel */
-.bgp-sim .ng-scope {
+.routing-sim .ng-scope {
 	height: auto;
 }
 
-.bgp-sim.ng-scope {
+.routing-sim.ng-scope {
 	height: 100%;
 }
 
-.bgp-sim-dest {
+.routing-sim-dest {
 	margin: 4px 0 8px;
 }
 
-.bgp-sim label {
+.routing-sim label {
 	margin-right: 1em;
 }
 
-.bgp-sim .table {
+.routing-sim .table {
 	margin-bottom: 8px;
 }
 
-.bgp-sim .bgp-table td {
+.routing-sim .bgp-table td {
 	font-family: monospace;
 	white-space: nowrap;
 }
 
-.bgp-sim .bgp-table td:last-child {
+/* routing table and BGP table side by side when there is room */
+.routing-sim-router {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 12px;
+}
+
+.routing-sim-router > div {
+	flex: 1 1 360px;
+	min-width: 0;
+	overflow-x: auto;
+}
+
+.routing-sim .bgp-table td:last-child,
+.routing-sim .bgp-table td.wrap {
 	font-family: inherit;
 	white-space: normal;
 }

@@ -1,15 +1,19 @@
 /* ---------------------------------------------------------------- */
-/* ------------------------ BGP SIMULATION ------------------------ */
+/* ---------------------- ROUTING SIMULATION ---------------------- */
 /* Approximates what FRR does with the configuration the generator  */
-/* writes (effectiveBgp): sessions, import/export policies, decision */
-/* process, an approximate RIP/OSPF and the forwarding of packets.   */
+/* writes: connected (loopbacks too) and static routes, an          */
+/* approximate RIP/OSPF, BGP (sessions, policies, decision process),*/
+/* redistribution with route-maps, the routing table of each router */
+/* (administrative distance, then longest prefix match) and the     */
+/* forwarding of packets.                                           */
 /* Pure functions, no DOM. Uses bgp-policy.js, bgp-as.js, lint.js.   */
 /* ---------------------------------------------------------------- */
 
-var SIM_NOTE = "This is an approximation of FRR computed from the lab configuration: the real check is show ip bgp (and show ip route) on the running lab.";
+var SIM_NOTE = "This is an approximation of FRR computed from the lab configuration: the real check is show ip route and show ip bgp on the running lab.";
 var SIM_MAX_PASSES = 100;
 var SIM_AD = { connected: 0, static: 1, ebgp: 20, ospf: 110, rip: 120, ibgp: 200 };
 var SIM_ORIGINS = ["i", "e", "?"];
+var SIM_CODES = { connected: "C", static: "S", rip: "R", ospf: "O", ebgp: "B-ext", ibgp: "B-int" };	// show ip route, BGP split in eBGP/iBGP
 
 function simKey(c) {
 	return ipToString(c.net) + "/" + c.len;
@@ -77,9 +81,16 @@ function simRouterConfig(M, bgpAs) {
 		else if (!/^(log|debug|hostname|password|enable password|service|line|exit|end)\b/.test(line))
 			M.warn("'" + line + "' in the FRR free text is not simulated");
 	}
-	for (let p of ["rip", "ospf", "bgp"]) {
-		if (!r[p].en) continue;
-		for (let x of redistributions(M.m, p, effectiveBgp(M.m, bgpAs).policies)) if (x.policy) M.warn("route-map " + x.policy.name + " on " + p + " redistribute " + x.src + " is not simulated: the routes are redistributed without it");
+	// the policies of the router (with the auto-generated ones): BGP neighbors and redistribute statements
+	M.policies = effectiveBgp(M.m, bgpAs).policies;
+	for (let p of M.policies) {
+		if (p.type != "route-map") continue;
+		for (let rule of p.rules) {
+			let kinds = rule.matches.map(m => m.match);
+			if (kinds.some((k, i) => kinds.indexOf(k) != i))
+				M.warn("route-map " + p.name + " seq " + rule.seq + " has two 'match' of the same kind: FRR keeps only the last one, the simulation does the same");
+			if (kinds.indexOf("interface") >= 0) M.warn("route-map " + p.name + " seq " + rule.seq + ": match interface is not simulated (never matches)");
+		}
 	}
 	for (let p of ["rip", "ospf"]) {
 		if (!r[p].en) continue;
@@ -95,7 +106,7 @@ function simRouterConfig(M, bgpAs) {
 	M.requiresPolicy = M.frr && !bgp.noEbgpRequiresPolicy;
 	M.importCheck = M.frr && !bgp.noNetworkImportCheck;
 	M.networks = (bgp.network || []).filter(n => n);
-	M.redistribute = REDISTRIBUTE.bgp.filter(src => bgp[src]);
+	M.redistribute = redistributions(M.m, "bgp", M.policies).filter(x => !x.missing);
 	M.nbr = {};	// free text per neighbor address: shutdown, nextHopSelf, multihop, updateSource, defaultOriginate
 	let nbr = ip => M.nbr[ip] = M.nbr[ip] || {};
 	for (let line of simFreeLines(bgp.free)) {
@@ -106,7 +117,7 @@ function simRouterConfig(M, bgpAs) {
 		else if (line == "bgp network import-check") M.importCheck = true;
 		else if ((x = /^bgp router-id (\S+)$/.exec(line)) && parseIp(x[1]) !== null) M.rid = parseIp(x[1]);
 		else if ((x = /^network (\S+)$/.exec(line))) M.networks.push(x[1]);
-		else if ((x = /^redistribute (connected|static|rip|ospf)$/.exec(line))) M.redistribute.push(x[1]);
+		else if ((x = /^redistribute (connected|static|rip|ospf)$/.exec(line))) M.redistribute.push({ src: x[1], policy: null });
 		else if ((n = /^neighbor (\S+) (.*)$/.exec(line)) && parseIp(n[1]) !== null) {
 			let o = nbr(n[1]), what = n[2];
 			if (what == "shutdown") o.shutdown = true;
@@ -118,15 +129,6 @@ function simRouterConfig(M, bgpAs) {
 			else M.warn("'" + line + "' in the BGP free text is not simulated");
 		}
 		else M.warn("'" + line + "' in the BGP free text is not simulated");
-	}
-	for (let p of eff.policies) {
-		if (p.type != "route-map") continue;
-		for (let rule of p.rules) {
-			let kinds = rule.matches.map(m => m.match);
-			if (kinds.some((k, i) => kinds.indexOf(k) != i))
-				M.warn("route-map " + p.name + " seq " + rule.seq + " has two 'match' of the same kind: FRR keeps only the last one, the simulation does the same");
-			if (kinds.indexOf("interface") >= 0) M.warn("route-map " + p.name + " seq " + rule.seq + ": match interface is not simulated (never matches)");
-		}
 	}
 }
 
@@ -143,7 +145,7 @@ function simRouterId(M) {
 function simDefinition(M, type, name) {
 	let cache = M.defs = M.defs || {}, k = type + " " + name;
 	if (cache[k]) return cache[k];
-	let policies = M.eff.policies, bySeq = {};
+	let policies = M.policies, bySeq = {};
 	for (let p of policies) {
 		if (p.type != type || p.name != name || policyNameError(p)) continue;
 		for (let rule of p.rules) if (!policyRuleError(policies, p, rule)) bySeq[+rule.seq] = rule;
@@ -211,7 +213,7 @@ function simRouteMap(M, name, route, ebgpOut, at) {
 		let ok = Object.keys(last).every(function (kind) {
 			let type = matchDef(last[kind]).type;
 			if (!type) return false;	// match interface: not simulated (warned)
-			let list = findPolicy(M.eff.policies, last[kind].value, type);
+			let list = findPolicy(M.policies, last[kind].value, type);
 			// match ip next-hop: the next hop as a /32 (a prefix-list needs le 32 to match it inside a subnet)
 			let subject = !/next-hop/.test(kind) ? route : route.nh === null || route.nh === undefined ? null : { prefix: { net: route.nh, len: 32 }, path: [] };
 			let res = list && subject && simListApply(M, type, list.name, subject);
@@ -228,7 +230,7 @@ function simRouteMap(M, name, route, ebgpOut, at) {
 
 function simApplied(M, remote, cmd, dir) {
 	let def = NEIGHBOR_POLICY_CMDS.find(c => c.cmd == cmd);
-	let p = remote.apply && remote.apply[cmd] && findPolicy(M.eff.policies, remote.apply[cmd][dir], def.type);
+	let p = remote.apply && remote.apply[cmd] && findPolicy(M.policies, remote.apply[cmd][dir], def.type);
 	return p && !policyNameError(p) ? p : null;
 }
 
@@ -284,24 +286,31 @@ function simCompare(a, b) {
 
 /* -------------------- forwarding table -------------------- */
 
+// the routing table (rib: every candidate per prefix) and the forwarding table (fib: the lowest administrative distance)
 function simBuildFib(M) {
-	let fib = {};
+	let rib = {};
 	let add = function (e) {
-		let k = simKey(e.c), old = fib[k];
-		if (!old || e.ad < old.ad) fib[k] = e;
+		e.code = SIM_CODES[e.type];
+		(rib[simKey(e.c)] = rib[simKey(e.c)] || []).push(e);
 	};
 	for (let a of M.addrs) if (a.up) add({ c: a.c, type: "connected", ad: 0, dev: a.dev, domain: a.domain, src: a.ip });
 	for (let s of M.statics) add({ c: s.c, type: "static", ad: SIM_AD.static, nh: s.nh });
 	for (let p of ["rip", "ospf"]) {
 		for (let k in (M.igp && M.igp[p]) || {}) {
 			let e = M.igp[p][k];
-			add({ c: e.c, type: p, ad: SIM_AD[p], nh: e.nh, metric: e.metric, hops: e.hops, from: e.origin });
+			add({ c: e.c, type: p, ad: SIM_AD[p], nh: e.nh, metric: e.metric, hops: e.hops, from: e.origin, redist: e.redist, ext: e.ext });
 		}
 	}
 	for (let k in M.best || {}) {
 		let b = M.best[k];
 		if (!b.local) add({ c: b.prefix, type: b.ebgp ? "ebgp" : "ibgp", ad: b.ebgp ? SIM_AD.ebgp : SIM_AD.ibgp, nh: b.nh, route: b });
 	}
+	let fib = {};
+	for (let k in rib) {
+		rib[k].sort((a, b) => a.ad - b.ad);	// stable: the first one of the lowest distance
+		fib[k] = rib[k][0];
+	}
+	M.rib = rib;
 	M.fib = fib;
 	M.fibList = Object.keys(fib).map(k => fib[k]).sort((a, b) => b.c.len - a.c.len);
 }
@@ -329,20 +338,32 @@ function simResolve(M, ip, exclude, depth) {
 // others along the shortest path (RIP: hops, at most 15; OSPF: sum of the interface costs, 10 by default)
 function simIgp(machines, proto) {
 	let rs = machines.filter(M => M.router && M.m.routing[proto].en);
-	let other = proto == "rip" ? "ospf" : "rip";
 	for (let R of rs) {
 		let cfg = R.m.routing[proto];
 		let nets = cfg.network.map(n => parseCidr(n || "")).filter(c => c);
 		R.igpIf = R.igpIf || {};
 		R.igpIf[proto] = R.addrs.filter(a => a.up && nets.some(c => simContains(simNet(c), a.ip)));
-		let own = {}, put = c => own[simKey(c)] = c;
-		let srcs = redistributions(R.m, proto, (R.eff || R.m.routing.bgp).policies).filter(x => !x.missing).map(x => x.src);
-		R.igpIf[proto].forEach(a => put(a.c));
-		if (srcs.indexOf("connected") >= 0) R.addrs.filter(a => a.up).forEach(a => put(a.c));
-		if (srcs.indexOf("static") >= 0) R.statics.forEach(s => put(s.c));
-		if (srcs.indexOf("bgp") >= 0) for (let k in R.best || {}) if (!R.best[k].local) put(R.best[k].prefix);
-		if (srcs.indexOf(other) >= 0) for (let k in (R.igp && R.igp[other]) || {}) put(R.igp[other][k].c);
-		if (proto == "rip") for (let x of cfg.route || []) { let c = parseCidr(x || ""); if (c) put(simNet(c)); }
+		// what the router announces: the subnets of its interfaces in the network statements, then the redistributed routes
+		let own = {}, put = (c, o) => { if (!own[simKey(c)]) own[simKey(c)] = Object.assign({ c: c }, o); };
+		R.igpIf[proto].forEach(a => put(a.c, { src: "network" }));
+		if (proto == "rip") for (let x of cfg.route || []) { let c = parseCidr(x || ""); if (c) put(simNet(c), { src: "route" }); }
+		// zebra redistributes the routes it selected (the forwarding table): an iBGP route that lost to RIP is not redistributed
+		R.redist = R.redist || {};
+		let notes = R.redist[proto] = [];
+		for (let x of redistributions(R.m, proto, R.policies).filter(x => !x.missing)) {
+			for (let e of (R.fibList || []).filter(e => x.src == "bgp" ? e.type == "ebgp" || e.type == "ibgp" : e.type == x.src)) {
+				let note = { prefix: simKey(e.c), src: x.src, code: e.code, nh: e.nh === undefined ? null : e.nh, ok: true, by: "" }, metric;
+				if (x.policy) {
+					let res = simRouteMap(R, x.policy.name, { prefix: e.c, path: [], communities: [], nh: note.nh, origin: 2 }, false, " (" + proto + " redistribute " + x.src + " on " + R.name + ")");
+					note.ok = !!res.route;
+					note.by = res.route ? res.by : "";
+					note.reason = res.reason || "";
+					if (res.route) metric = res.route.med;
+				}
+				notes.push(note);
+				if (note.ok) put(e.c, { src: x.src, by: note.by, metric: metric });
+			}
+		}
 		R.igpOwn = R.igpOwn || {};
 		R.igpOwn[proto] = own;
 	}
@@ -374,14 +395,19 @@ function simIgp(machines, proto) {
 				}
 			}
 		}
-		let table = {};
+		// RIP: hops + the metric of the origin (1, or set metric of its route-map); OSPF: the internal routes beat the
+		// external ones (redistributed), compared by their metric (20, or set metric), then by the cost to the origin
+		let table = {}, key = e => proto == "ospf" ? [e.ext ? 1 : 0, e.ext ? e.extMetric : 0, e.metric] : [e.metric];
+		let better = (a, b) => { let x = key(a), y = key(b); for (let i = 0; i < x.length; i++) if (x[i] != y[i]) return x[i] < y[i]; return false; };
 		for (let O of rs) {
 			if (O === R || dist[O.name] === undefined) continue;
 			for (let k in O.igpOwn[proto]) {
-				let metric = dist[O.name] + (proto == "rip" ? 1 : 0);
+				let o = O.igpOwn[proto][k], ext = o.src != "network" && o.src != "route";
+				let metric = dist[O.name] + (proto == "rip" ? (o.metric !== undefined ? o.metric : 1) : 0);
 				if (proto == "rip" && metric > 15) continue;
-				if (!table[k] || metric < table[k].metric)
-					table[k] = { c: O.igpOwn[proto][k], nh: first[O.name], metric: metric, hops: hops[O.name], origin: O.name };
+				let e = { c: o.c, nh: first[O.name], metric: metric, hops: hops[O.name], origin: O.name, ext: ext, extMetric: o.metric !== undefined ? o.metric : 20,
+					redist: ext ? { src: o.src, by: o.by } : null };
+				if (!table[k] || better(e, table[k])) table[k] = e;
 			}
 		}
 		result[R.name] = table;
@@ -471,6 +497,21 @@ function simSessionState(s) {
 		s.why = a.r.name + " connects from " + ipToString(a.src) + " but " + b.r.name + " expects " + b.remote.neighbor + " (update-source?)";
 		return;
 	}
+	// the TCP session needs a route both ways: from the end that connects to the address it calls and back to its source
+	// (iBGP between loopbacks: only if the IGP carries both loopbacks)
+	let reach = (R, ip) => R.addrs.some(x => x.up && x.domain && simContains(x.c, ip)) || !!simResolve(R, ip);
+	let lo = ip => ip !== null && s.ends.some(e => e.r.addrs.some(x => x.ip == ip && !x.domain)) ? " (a loopback: does the IGP carry it?)" : "";
+	let fail = "";
+	for (let [x, y] of [[a, b], [b, a]]) {
+		if (x.src != y.peerIp) continue;
+		if (!reach(x.r, x.peerIp)) fail = fail || x.r.name + " has no route to " + x.remote.neighbor + lo(x.peerIp);
+		else if (!reach(y.r, x.src)) fail = fail || y.r.name + " has no route back to " + ipToString(x.src) + ", the source of " + x.r.name + lo(x.src);
+		else { fail = ""; break; }
+	}
+	if (fail) {
+		s.why = fail;
+		return;
+	}
 	s.up = true;
 }
 
@@ -549,9 +590,16 @@ function simDecide(R) {
 		}
 		local(c, 0, "network " + n);
 	}
-	for (let what of R.redistribute) {
+	// redistribute <source> [route-map]: the routes of that type in the forwarding table
+	for (let x of R.redistribute) {
 		for (let e of R.fibList) {
-			if (e.type == what) local(e.c, 2, "redistribute " + what);
+			if (e.type != x.src) continue;
+			let what = "redistribute " + x.src;
+			if (!x.policy) { local(e.c, 2, what); continue; }
+			let route = { prefix: e.c, key: simKey(e.c), path: [], origin: 2, med: 0, lp: 100, nh: e.nh === undefined ? null : e.nh, communities: [] };
+			let res = simRouteMap(R, x.policy.name, route, false, " (" + what + " on " + R.name + ")");
+			if (!res.route) add(Object.assign(route, { nh: null, local: true, status: "rejected", what: what, reason: res.reason }));
+			else add(Object.assign(res.route, { nh: null, local: true, ebgp: false, rid: rid, peerIp: 0, igp: 0, what: what + ", " + res.by }));
 		}
 	}
 	for (let end of R.ends) {
@@ -599,7 +647,7 @@ function simSignature(ms) {
 /* -------------------- simulation -------------------- */
 
 // opts.down: { sessions: { key: true }, domains: { name: true } }
-function bgpSimulate(netkit, bgpAs, opts) {
+function routingSimulate(netkit, bgpAs, opts) {
 	opts = opts || {};
 	let down = { sessions: (opts.down && opts.down.sessions) || {}, domains: (opts.down && opts.down.domains) || {} };
 	let warnings = [];
@@ -608,6 +656,7 @@ function bgpSimulate(netkit, bgpAs, opts) {
 	let routers = ms.list.filter(M => M.eff);
 	if (ms.list.some(M => M.router && !M.frr)) warnings.push({ machine: "", text: "Quagga routers are simulated like FRR, without ebgp-requires-policy and network import-check" });
 	for (let M of ms.list) { M.best = {}; M.table = {}; M.igp = {}; M.ends = M.ends || []; }
+	ms.list.forEach(simBuildFib);	// connected and static routes: what the IGPs redistribute in the first round
 
 	let prev = "", converged = false, pass;
 	for (pass = 1; pass <= SIM_MAX_PASSES; pass++) {
@@ -641,6 +690,42 @@ function bgpSimulate(netkit, bgpAs, opts) {
 
 /* -------------------- queries -------------------- */
 
+// show ip route of a router, with the losers: [{ prefix, routes: [{ code, nh, via, ad, metric, from, selected, reason }], pitfall }]
+// and what it redistributes: [{ into, prefix, code, src, ok, text }]
+function routingSimRib(sim, name) {
+	let R = sim.byName[name];
+	if (!R || !R.rib) return null;
+	let rows = Object.keys(R.rib).map(k => R.rib[k]).sort((a, b) => a[0].c.net - b[0].c.net || a[0].c.len - b[0].c.len).map(function (list) {
+		let best = list[0];
+		return {
+			prefix: simKey(best.c),
+			pitfall: simPitfall(sim, R, best),
+			routes: list.map(function (e, i) {
+				let via = e.type == "connected" ? null : simResolve(R, e.nh, e.route ? simKey(e.c) : undefined);
+				let what = e.type == "connected" ? e.dev + (e.domain ? " (" + e.domain + ")" : "") : e.type == "static" ? "static"
+					: e.route ? (e.route.end ? "from " + e.route.end.other.r.name : "") + (e.route.path.length ? ", AS-path " + e.route.path.join(" ") : "")
+					: simIgpOrigin(e) + ", metric " + e.metric;
+				return {
+					code: e.code, ad: e.ad, selected: i == 0, what: what,
+					nh: e.type == "connected" ? "directly connected" : ipToString(e.nh) + (via && via.ip != e.nh ? " via " + ipToString(via.ip) : "") + (via ? "" : " (unreachable)"),
+					reason: i == 0 ? (list.length > 1 ? "lowest administrative distance" : "only route") : "AD " + e.ad + " > " + best.ad + " (" + best.code + ")"
+				};
+			})
+		};
+	});
+	let redist = [];
+	for (let p of ["rip", "ospf"]) {
+		for (let n of (R.redist && R.redist[p]) || []) {
+			redist.push({ into: p.toUpperCase(), prefix: n.prefix, code: n.code, ok: n.ok,
+				text: n.ok ? (n.by ? "permitted by " + n.by : "no route-map") : n.reason });
+		}
+	}
+	for (let k in R.table || {}) {
+		for (let r of R.table[k]) if (r.local && /^redistribute/.test(r.what || "")) redist.push({ into: "BGP", prefix: k, code: "", ok: r.status != "rejected", text: r.status == "rejected" ? r.reason : r.what });
+	}
+	return { rows: rows, redist: redist };
+}
+
 function simRoleText(sim, R, r) {
 	if (r.local || !r.path.length || !sim.bgpAs) return "";
 	let role = asRole(sim.bgpAs, String(R.asn), String(r.path[0]));
@@ -671,7 +756,7 @@ function bgpSimTable(sim, name) {
 }
 
 // data plane: follows the forwarding tables router by router
-function bgpSimTrace(sim, srcName, dst) {
+function routingSimTrace(sim, srcName, dst) {
 	let cur = sim.byName[srcName], hops = [], seen = {};
 	let res = { src: srcName, dst: ipToString(dst), hops: hops, delivered: false };
 	while (cur) {
@@ -696,6 +781,9 @@ function bgpSimTrace(sim, srcName, dst) {
 		}
 		hop.prefix = simKey(e.c);
 		hop.type = e.type;
+		hop.code = e.code;
+		hop.ad = e.ad;
+		hop.pitfall = simPitfall(sim, cur, e);
 		let via = e.type == "connected" ? { ip: dst, domain: e.domain } : simResolve(cur, e.nh);
 		if (!via) {
 			res.fail = cur.name + ": next hop " + ipToString(e.nh) + " of " + hop.prefix + " unreachable";
@@ -723,19 +811,34 @@ function bgpSimTrace(sim, srcName, dst) {
 	return res;
 }
 
+// where an IGP route comes from: "from b2, redistributed bgp there (route-map eBGP seq 10)"
+function simIgpOrigin(e) {
+	return "from " + e.from + (e.redist ? ", redistributed " + e.redist.src + " there" + (e.redist.by ? " (" + e.redist.by + ")" : "") : "");
+}
+
+// the administrative-distance pitfall: an IGP route (110/120) beats the iBGP route (200) that BGP chose, towards another exit
+function simPitfall(sim, R, e) {
+	let b = R.best && R.best[simKey(e.c)];
+	if ((e.type != "rip" && e.type != "ospf") || !b || b.local || b.ebgp) return "";
+	let exit = sim.owner[b.nh], bgpExit = exit ? exit.name : ipToString(b.nh);
+	if (bgpExit == e.from) return "";
+	return e.type.toUpperCase() + " (AD " + e.ad + ", " + simIgpOrigin(e) + ") beats iBGP (AD " + SIM_AD.ibgp + "): BGP chose the exit "
+		+ bgpExit + " (next hop " + ipToString(b.nh) + "), the packets go towards " + e.from + " instead";
+}
+
 function simHopReason(sim, R, e) {
 	switch (e.type) {
 		case "connected": return "directly connected";
 		case "static": return "static route";
-		case "rip": return "RIP route, metric " + e.metric + " (from " + e.from + ")";
-		case "ospf": return "OSPF route, cost " + e.metric + " (from " + e.from + ")";
+		case "rip": return "RIP route, metric " + e.metric + " (" + simIgpOrigin(e) + ")";
+		case "ospf": return "OSPF " + (e.ext ? "external" : "") + " route, cost " + e.metric + " (" + simIgpOrigin(e) + ")";
 	}
 	let r = e.route;
 	return (e.type == "ibgp" ? "iBGP, " : "eBGP, ") + simRoleText(sim, R, r) + r.reason + (r.lp !== undefined && !/local-pref/.test(r.reason) ? ", local-pref " + r.lp : "");
 }
 
 // the ASes crossed by a trace, in order
-function bgpSimAsPath(sim, trace) {
+function routingSimAsPath(sim, trace) {
 	let list = [];
 	let push = n => { let M = sim.byName[n], x = M && (M.asn || M.asGuess); if (x && list[list.length - 1] !== x) list.push(x); };
 	trace.hops.forEach(h => push(h.m));
@@ -768,11 +871,11 @@ function bgpSimValley(bgpAs, ases) {
 }
 
 // expected path: router names, or AS numbers compared with the ASes crossed
-function bgpSimExpected(sim, trace, text) {
+function routingSimExpected(sim, trace, text) {
 	let want = String(text || "").trim().split(/[\s,>-]+/).filter(t => t);
 	if (!want.length) return null;
 	let byAs = want.every(t => /^\d+$/.test(t));
-	let got = byAs ? bgpSimAsPath(sim, trace).map(String) : trace.hops.map(h => h.m).concat(trace.delivered ? [trace.end] : []);
+	let got = byAs ? routingSimAsPath(sim, trace).map(String) : trace.hops.map(h => h.m).concat(trace.delivered ? [trace.end] : []);
 	for (let i = 0; i < Math.max(want.length, got.length); i++) {
 		if (want[i] !== got[i]) {
 			return { ok: false, index: i, byAs: byAs, text: "diverges at step " + (i + 1) + ": expected " + (want[i] ? (byAs ? "AS " : "") + want[i] : "the end") + ", the simulation gives "
@@ -829,14 +932,14 @@ function bgpSimPrefixesFor(sim, ip) {
 }
 
 // everything the Topology tab shows for a source (name or "" for all routers) and a destination (IP or prefix)
-function bgpSimQuery(sim, q) {
+function routingSimQuery(sim, q) {
 	let res = { traces: [], graph: { path: [], nodes: [], overlay: [] } };
 	let text = String(q.dest || "").trim();
 	if (!text) return res;
 	let c = text.indexOf("/") >= 0 ? parseCidr(text) : null, ip = c ? null : parseIp(text);
 	if (c) ip = c.len >= 31 ? c.net : c.net + 1;
 	if (ip === null || ip === undefined) {
-		res.machines = bgpSimMachineAddresses(sim, text);
+		res.machines = routingSimMachineAddresses(sim, text);
 		if (!res.machines.length) res.error = "'" + text + "' is not an IP address, a prefix or the name of a machine";
 		return res;
 	}
@@ -845,12 +948,14 @@ function bgpSimQuery(sim, q) {
 	let sources = q.source ? [q.source] : sim.machines.filter(M => M.router).map(M => M.name);
 	for (let src of sources) {
 		if (!sim.byName[src]) continue;
-		let t = bgpSimTrace(sim, src, ip);
-		t.ases = bgpSimAsPath(sim, t);
+		let t = routingSimTrace(sim, src, ip);
+		t.ases = routingSimAsPath(sim, t);
 		t.route = t.hops.map(h => h.m).concat(t.delivered ? [t.end] : []).join(" > ");
 		t.routeAses = bgpSimRouteAses(t);
+		let pit = t.hops.find(h => h.pitfall);
+		if (pit) [t.pitfall, t.pitfallAt] = [pit.pitfall, pit.m];
 		t.valley = t.routeAses && bgpSimValley(sim.bgpAs, t.routeAses);
-		if (q.source) t.expected = bgpSimExpected(sim, t, q.expected);
+		if (q.source) t.expected = routingSimExpected(sim, t, q.expected);
 		if (t.noRoute) t.lost = bgpSimLost(sim, t.end, ip);
 		res.traces.push(t);
 		t.hops.forEach(function (h, i) {
@@ -871,7 +976,7 @@ function bgpSimQuery(sim, q) {
 
 // machines whose name starts with text, with their addresses as in the configuration (interfaces, then the
 // startup free text) and the collision domain of each: [{ name, addrs: [{ ip, cidr, dev, domain, peers }] }]
-function bgpSimMachineAddresses(sim, text) {
+function routingSimMachineAddresses(sim, text) {
 	let t = text.toLowerCase();
 	return sim.machines.filter(M => M.name.toLowerCase().indexOf(t) == 0).map(M => ({
 		name: M.name,

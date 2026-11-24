@@ -309,19 +309,19 @@ function makeGraph(netkit, reset, bgpAs) {
 		}
 	}
 	draw(graph.nodes, graph.edges, keep);
-	network.on("click", params => { if (bgpGraphClick) bgpGraphClick(params); });
-	if (bgpSimGraph) bgpHighlight(bgpSimGraph);
+	network.on("click", params => { if (routingGraphClick) routingGraphClick(params); });
+	if (routingSimGraph) routingHighlight(routingSimGraph);
 }
 
-/* ---------------- BGP Mode (bgp-sim.js) ---------------- */
+/* ---------------- Routing Mode (routing-sim.js) ---------------- */
 // the path and the propagation are extra edges drawn over the graph (ids bgpsim-*), removed at every change
 
-var bgpSimGraph = null;	// last thing shown, drawn again when the graph is rebuilt
-var bgpGraphClick = null;	// set by the controller: click on a node while BGP Mode is on
+var routingSimGraph = null;	// last thing shown, drawn again when the graph is rebuilt
+var routingGraphClick = null;	// set by the controller: click on a node while Routing Mode is on
 
 // g: { path: [{ from, to, domain, label }], nodes: [names], overlay: [{ from, to, status, title }] } or null
-function bgpHighlight(g) {
-	bgpSimGraph = g;
+function routingHighlight(g) {
+	routingSimGraph = g;
 	if (typeof network != "object" || !network.body) return;
 	let edges = network.body.data.edges, nodes = network.body.data.nodes;
 	edges.remove(edges.getIds({ filter: e => /^bgpsim-/.test(e.id) }));

@@ -3,7 +3,7 @@
 
 <head>
 	<meta charset="utf-8" />
-	<title>BGP simulation tests</title>
+	<title>Routing simulation tests</title>
 	<style>
 		body { font-family: sans-serif; margin: 2em; }
 		td, th { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
@@ -17,11 +17,11 @@
 	<script src="../src/lab-generator/bgp-as.js"></script>
 	<script src="../src/lab-generator/lint.js"></script>
 	<script src="../src/lab-generator/models/model.js"></script>
-	<script src="../src/lab-generator/bgp-sim.js"></script>
+	<script src="../src/lab-generator/routing-sim.js"></script>
 </head>
 
 <body>
-	<h2>BGP simulation (src/lab-generator/bgp-sim.js)</h2>
+	<h2>Routing simulation (src/lab-generator/routing-sim.js)</h2>
 	<p>Expected results from the course labs (bgp-multi-homed-stub, bgp-multi-homed) and slides (430-bgp-internet-hierarchy, "a forbidden path in the model"). Open this file in a browser, no server needed.</p>
 	<p id="summary"></p>
 	<table id="results"><tr><th></th><th>Test</th><th>Details</th></tr></table>
@@ -175,7 +175,7 @@
 
 		/* ---- tests ---- */
 
-		function runBgpSimTests() {
+		function runRoutingSimTests() {
 			let results = [];
 			let test = function (name, fn) {
 				try {
@@ -188,7 +188,7 @@
 			let show = t => (t.hops.filter(h => h.prefix).map(h => h.m + " [" + h.prefix + " " + h.type + (h.nh ? " nh " + h.nh : "") + " via " + h.via + (h.path !== undefined ? " path " + h.path : "") + "] " + h.reason).join("\n")
 				+ "\n" + (t.delivered ? "delivered at " + t.end : "FAILED: " + t.fail));
 			let trace = (sim, src, dst, detail) => {
-				let t = bgpSimTrace(sim, src, parseIp(dst));
+				let t = routingSimTrace(sim, src, parseIp(dst));
 				detail.push(src + " -> " + dst + ":\n" + show(t));
 				return t;
 			};
@@ -202,22 +202,22 @@
 			let bgpAs0 = { relations: [], ases: {} };
 
 			test("multi-homed-stub, primary link up: as200r1 -> 100.1.0.1 goes through as20r2 (20.1.1.2)", function (detail) {
-				let sim = bgpSimulate(multiHomedStub(), bgpAs0);
+				let sim = routingSimulate(multiHomedStub(), bgpAs0);
 				let ok = noProblems(sim, detail);
 				let t = trace(sim, "as200r1", "100.1.0.1", detail);
 				return ok && t.delivered && hopOf(t, "as20r1").via == "20.1.1.2" && hopOf(t, "as20r1").next == "as20r2";
 			});
 
 			test("multi-homed-stub, primary link up (control): as100r1 -> 200.2.0.1 uses the primary neighbor 11.0.0.2", function (detail) {
-				let sim = bgpSimulate(multiHomedStub(), bgpAs0);
+				let sim = routingSimulate(multiHomedStub(), bgpAs0);
 				let t = trace(sim, "as100r1", "200.2.0.1", detail);
 				return t.delivered && t.hops[0].via == "11.0.0.2";
 			});
 
 			test("multi-homed-stub, primary session shut down on as100r1: as100r1 -> 200.2.0.1 via the backup neighbor 11.0.0.6", function (detail) {
-				let lab = multiHomedStub(), sim0 = bgpSimulate(lab, bgpAs0), key = downKey(sim0, "as100r1", "11.0.0.2"), down = { sessions: {}, domains: {} };
+				let lab = multiHomedStub(), sim0 = routingSimulate(lab, bgpAs0), key = downKey(sim0, "as100r1", "11.0.0.2"), down = { sessions: {}, domains: {} };
 				down.sessions[key] = true;
-				let sim = bgpSimulate(lab, bgpAs0, { down: down });
+				let sim = routingSimulate(lab, bgpAs0, { down: down });
 				detail.push("down: " + key);
 				let t = trace(sim, "as100r1", "200.2.0.1", detail);
 				return t.delivered && t.hops[0].via == "11.0.0.6" && t.hops[0].next == "as20r1";
@@ -226,26 +226,26 @@
 			test("multi-homed-stub, same with 'neighbor 11.0.0.2 shutdown' in the BGP free text of as100r1", function (detail) {
 				let lab = multiHomedStub();
 				lab.find(m => m.name == "as100r1").routing.bgp.free = "neighbor 11.0.0.2 shutdown";
-				let sim = bgpSimulate(lab, bgpAs0);
+				let sim = routingSimulate(lab, bgpAs0);
 				let t = trace(sim, "as100r1", "200.2.0.1", detail);
 				return t.delivered && t.hops[0].via == "11.0.0.6";
 			});
 
 			test("multi-homed (load sharing): as1r1 -> 200.1.0.2 via the AS30 side (11.0.0.25)", function (detail) {
-				let sim = bgpSimulate(multiHomed(), bgpAs0);
+				let sim = routingSimulate(multiHomed(), bgpAs0);
 				let ok = noProblems(sim, detail);
 				let t = trace(sim, "as1r1", "200.1.0.2", detail);
 				return ok && t.hops[0].via == "11.0.0.25" && t.hops[0].prefix == "200.1.0.0/17" && t.delivered;
 			});
 
 			test("multi-homed (load sharing): as1r1 -> 200.1.128.2 via the AS40 side (11.0.0.29)", function (detail) {
-				let sim = bgpSimulate(multiHomed(), bgpAs0);
+				let sim = routingSimulate(multiHomed(), bgpAs0);
 				let t = trace(sim, "as1r1", "200.1.128.2", detail);
 				return t.hops[0].via == "11.0.0.29" && t.hops[0].prefix == "200.1.128.0/17" && t.delivered;
 			});
 
 			test("forbidden path: with the customer-provider model applied, AS4 reaches AS5 via AS1 AS2, not via AS8", function (detail) {
-				let lab = hierarchy("cp"), sim = bgpSimulate(lab.netkit, lab.bgpAs);
+				let lab = hierarchy("cp"), sim = routingSimulate(lab.netkit, lab.bgpAs);
 				let ok = noProblems(sim, detail);
 				let t = trace(sim, "as4r1", "100.5.0.1", detail), ases = bgpSimRouteAses(t), v = bgpSimValley(lab.bgpAs, ases);
 				detail.push("AS-path " + ases.join(" ") + ": " + v.text);
@@ -255,7 +255,7 @@
 			});
 
 			test("forbidden path: with the customer-provider model applied, every route of every router is valley-free", function (detail) {
-				let lab = hierarchy("cp"), sim = bgpSimulate(lab.netkit, lab.bgpAs), bad = [];
+				let lab = hierarchy("cp"), sim = routingSimulate(lab.netkit, lab.bgpAs), bad = [];
 				for (let R of sim.routers) for (let k in R.best) {
 					let b = R.best[k], v = b.local ? null : bgpSimValley(lab.bgpAs, [R.asn].concat(b.path));
 					if (v && v.status != "type-1" && v.status != "type-2") bad.push(R.name + " " + k + " path " + b.path.join(" ") + ": " + v.text);
@@ -265,7 +265,7 @@
 			});
 
 			test("forbidden path (control): without a model AS4 picks the valley AS4 AS8 AS5, and it is flagged", function (detail) {
-				let lab = hierarchy("none"), sim = bgpSimulate(lab.netkit, lab.bgpAs);
+				let lab = hierarchy("none"), sim = routingSimulate(lab.netkit, lab.bgpAs);
 				let t = trace(sim, "as4r1", "100.5.0.1", detail), ases = bgpSimRouteAses(t), v = bgpSimValley(lab.bgpAs, ases);
 				detail.push("AS-path " + ases.join(" ") + ": " + v.text);
 				return ases.join(" ") == "4 8 5" && v.status == "invalid";
@@ -274,7 +274,7 @@
 			/* engine details the labs above rely on */
 
 			test("import-check: as20r1 does not announce network 0.0.0.0/0 (no default route in its routing table)", function (detail) {
-				let sim = bgpSimulate(multiHomedStub(), bgpAs0), r = (sim.byName.as20r1.table["0.0.0.0/0"] || []).find(x => x.local);
+				let sim = routingSimulate(multiHomedStub(), bgpAs0), r = (sim.byName.as20r1.table["0.0.0.0/0"] || []).find(x => x.local);
 				detail.push(r ? r.status + ": " + r.reason : "no local route");
 				return r && r.status == "rejected" && /import-check/.test(r.reason);
 			});
@@ -282,7 +282,7 @@
 			test("ebgp-requires-policy: without the flag as200r1 exchanges nothing and the lost announcement is explained", function (detail) {
 				let lab = multiHomedStub();
 				lab.find(m => m.name == "as200r1").routing.bgp.noEbgpRequiresPolicy = false;
-				let sim = bgpSimulate(lab, bgpAs0), q = bgpSimQuery(sim, { source: "as200r1", dest: "100.1.0.1" }), t = q.traces[0];
+				let sim = routingSimulate(lab, bgpAs0), q = routingSimQuery(sim, { source: "as200r1", dest: "100.1.0.1" }), t = q.traces[0];
 				detail.push(show(t), JSON.stringify(t.lost));
 				return !t.delivered && t.lost.some(l => l.rows.some(r => /ebgp-requires-policy/.test(r.reason)));
 			});
@@ -291,7 +291,7 @@
 				let lab = multiHomedStub();
 				let r2 = lab.find(m => m.name == "as20r2");
 				r2.routing.bgp.network = r2.routing.bgp.network.filter(n => n != "11.0.0.0/30");
-				let sim = bgpSimulate(lab, bgpAs0), t = trace(sim, "as200r1", "100.1.0.1", detail);
+				let sim = routingSimulate(lab, bgpAs0), t = trace(sim, "as200r1", "100.1.0.1", detail);
 				let ibgp = sim.byName.as20r1.table["100.1.0.0/16"].find(r => !r.ebgp);
 				detail.push("iBGP route: " + ibgp.status + " " + ibgp.reason);
 				return ibgp.status == "invalid" && hopOf(t, "as20r1").next == "as100r1";
@@ -302,14 +302,14 @@
 				let pl = (name, prefix) => { let p = { id: 900 + bgp.policies.length, type: "prefix-list", name: name, rules: [{ seq: 5, action: "permit", prefix: prefix, ge: null, le: null }] }; bgp.policies.push(p); return p.id; };
 				let rm = bgp.policies.find(p => p.name == "localPrefIn");
 				rm.rules[0].matches = [{ match: "ip address prefix-list", value: pl("defaultOnly", "0.0.0.0/0") }, { match: "ip address prefix-list", value: pl("nothing", "1.2.3.0/24") }];
-				let sim = bgpSimulate(lab, bgpAs0), r = sim.byName.as100r1.table["0.0.0.0/0"].find(x => x.end.remote.neighbor == "11.0.0.6");
+				let sim = routingSimulate(lab, bgpAs0), r = sim.byName.as100r1.table["0.0.0.0/0"].find(x => x.end.remote.neighbor == "11.0.0.6");
 				detail.push(r.status + ": " + r.reason, sim.warnings.map(w => w.text).join("\n"));
 				return r.status == "rejected" && /no entry matches/.test(r.reason) && sim.warnings.some(w => /keeps only the last/.test(w.text));
 			});
 
 			test("expected path: the first divergence is reported", function (detail) {
-				let sim = bgpSimulate(multiHomedStub(), bgpAs0), t = bgpSimTrace(sim, "as200r1", parseIp("100.1.0.1"));
-				let a = bgpSimExpected(sim, t, "as200r1 as20r1 as100r1"), b = bgpSimExpected(sim, t, "200 20 100"), c = bgpSimExpected(sim, t, "as200r1 as20r1 as20r2 as100r1");
+				let sim = routingSimulate(multiHomedStub(), bgpAs0), t = routingSimTrace(sim, "as200r1", parseIp("100.1.0.1"));
+				let a = routingSimExpected(sim, t, "as200r1 as20r1 as100r1"), b = routingSimExpected(sim, t, "200 20 100"), c = routingSimExpected(sim, t, "as200r1 as20r1 as20r2 as100r1");
 				detail.push(a.text, b.text, c.text);
 				return !a.ok && a.index == 2 && b.ok && c.ok;
 			});
@@ -318,7 +318,7 @@
 	</script>
 	<script>
 		(function () {
-			let results = runBgpSimTests(), table = document.getElementById("results");
+			let results = runRoutingSimTests(), table = document.getElementById("results");
 			for (let r of results) {
 				let tr = table.insertRow();
 				tr.insertCell().innerHTML = r.ok ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>';

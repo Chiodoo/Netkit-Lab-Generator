@@ -141,7 +141,7 @@
 				<script src="src/lab-generator/bgp-policy.js"></script>
 				<script src="src/lab-generator/bgp-as.js"></script>
 				<script src="src/lab-generator/lint.js"></script>
-				<script src="src/lab-generator/bgp-sim.js"></script>
+				<script src="src/lab-generator/routing-sim.js"></script>
 				<script src="src/lab-generator/models/model.js"></script>
 				<script src="src/lab-generator/make.js"></script>
 
@@ -1058,16 +1058,16 @@
 						<button type="button" class="btn btn-default" title="Zoom out" onclick="zoomNetwork(0.8)">&minus;</button>
 						<button type="button" class="btn btn-default" title="Show the whole lab" onclick="network.fit()">Fit</button>
 					</div>
-					<label class="btn btn-default" style="margin: 0 0 0 6px;" title="Simulate BGP on the lab configuration and show how traffic moves">
-						<input type="checkbox" data-ng-model="sim.on" data-ng-change="simToggle()"> BGP Mode
+					<label class="btn btn-default" style="margin: 0 0 0 6px;" title="Simulate the routing of the lab (connected, static, RIP, OSPF, BGP, redistribution) and show how traffic moves">
+						<input type="checkbox" data-ng-model="sim.on" data-ng-change="simToggle()"> Routing Mode
 					</label>
 					<span class="text-muted">&nbsp;Fixed layout (on once the graph settles): place the machines, they stay where you drop them; collision domains sit between their machines, interfaces and labels next to them (drag one to shift it). Untick it to let physics move everything, Reset to start over. Mouse wheel zooms, drag the background to pan.</span>
 				</div>
 				<div style="display: flex; height: calc(100% - 320px);">
 				<div id="mynetwork" style="flex: 1; min-width: 0; height: 100%; border: 1px solid lightgray;"></div>
 
-				<!-- BGP MODE (logic in bgp-sim.js) -->
-				<div class="bgp-sim" data-ng-if="sim.on">
+				<!-- ROUTING MODE (logic in routing-sim.js) -->
+				<div class="routing-sim" data-ng-if="sim.on">
 					<p class="text-muted">{{SIM_NOTE}}</p>
 					<div class="form-inline">
 						<label>Source
@@ -1082,7 +1082,7 @@
 						</label>
 					</div>
 					<!-- a machine name in Destination: its addresses, click one to trace towards it -->
-					<div data-ng-repeat="m in simView.machines" class="bgp-sim-dest">
+					<div data-ng-repeat="m in simView.machines" class="routing-sim-dest">
 						<b>{{m.name}}</b>
 						<div data-ng-repeat="a in m.addrs">
 							<a href="" data-ng-click="simSetDest(a.ip)">{{a.dev}} {{a.cidr}}</a>
@@ -1115,12 +1115,16 @@
 							AS-path {{t.routeAses.join(' ')}}: {{t.valley.text}}</p>
 						<p data-ng-if="t.expected" data-ng-class="t.expected.ok ? 'text-success' : 'text-danger'">Expected path: {{t.expected.text}}</p>
 						<table class="table table-condensed">
-							<tr><th>#</th><th>Router</th><th>AS</th><th>Matched prefix</th><th>Next hop</th><th>AS-path</th><th>LocPrf</th><th>MED</th><th>Why</th></tr>
-							<tr data-ng-repeat="h in t.hops" data-ng-class="{ danger: t.expected && !t.expected.ok && !t.expected.byAs && t.expected.index == $index }"
-								data-ng-click="simSelect(h.m)" title="click: BGP table of {{h.m}}" style="cursor: pointer;">
-								<td>{{$index + 1}}</td><td>{{h.m}}</td><td>{{h.as}}</td><td>{{h.prefix}} <small class="text-muted">{{h.type}}</small></td>
+							<tr><th>#</th><th>Router</th><th>AS</th><th title="the protocol of the route used: C connected, S static, R RIP, O OSPF, B-ext eBGP, B-int iBGP">Proto</th>
+								<th title="administrative distance">AD</th><th>Matched prefix</th><th>Next hop</th><th>AS-path</th><th>LocPrf</th><th>MED</th><th>Why</th></tr>
+							<tr data-ng-repeat-start="h in t.hops" data-ng-class="{ danger: t.expected && !t.expected.ok && !t.expected.byAs && t.expected.index == $index, warning: h.pitfall }"
+								data-ng-click="simSelect(h.m)" title="click: routing table of {{h.m}}" style="cursor: pointer;">
+								<td>{{$index + 1}}</td><td>{{h.m}}</td><td>{{h.as}}</td><td><b>{{h.code}}</b></td><td>{{h.ad}}</td><td>{{h.prefix}}</td>
 								<td>{{h.nh}}<span data-ng-if="h.nh != h.via"> via {{h.via}}</span> &rarr; {{h.next}}</td>
 								<td>{{h.path}}</td><td>{{h.lp}}</td><td>{{h.med}}</td><td>{{h.reason}}</td>
+							</tr>
+							<tr data-ng-repeat-end data-ng-if="h.pitfall" class="warning">
+								<td></td><td colspan="10"><b>Administrative distance:</b> {{h.pitfall}}</td>
 							</tr>
 						</table>
 					</div>
@@ -1130,7 +1134,8 @@
 						<tr><th>Source</th><th>Result</th><th>Path</th><th>Valley-free</th></tr>
 						<tr data-ng-repeat="t in simView.traces" data-ng-click="simTraceSource(t.src)" title="click: hop by hop from {{t.src}}" style="cursor: pointer;">
 							<td>{{t.src}}</td>
-							<td data-ng-class="t.delivered ? 'text-success' : 'text-danger'">{{t.delivered ? 'delivered to ' + t.end : t.fail}}</td>
+							<td data-ng-class="t.delivered ? 'text-success' : 'text-danger'">{{t.delivered ? 'delivered to ' + t.end : t.fail}}
+								<div data-ng-if="t.pitfall" class="text-warning" title="{{t.pitfall}}">IGP beats iBGP at {{t.pitfallAt}}</div></td>
 							<td>{{t.route}}</td>
 							<td data-ng-class="{ 'text-danger': t.valley.status == 'invalid' }">{{t.valley ? t.valley.status : ''}}</td>
 						</tr>
@@ -1158,17 +1163,41 @@
 						</table>
 					</div>
 
-					<!-- show ip bgp of the router clicked on the graph or in the hop table -->
+					<!-- routing table and BGP table of the router clicked on the graph or in the hop table -->
 					<div class="form-inline">
-						<label title="also: click a router on the graph or a row of the hop table">show ip bgp on
+						<label title="also: click a router on the graph or a row of the hop table">Router
 							<select class="form-control input-sm" data-ng-model="sim.selected" data-ng-change="simRun()">
 								<option value="">(none)</option>
-								<option data-ng-repeat="n in simBgpRouters" value="{{n}}">{{n}}</option>
+								<option data-ng-repeat="n in simRouters" value="{{n}}">{{n}}</option>
 							</select>
 						</label>
 					</div>
-					<div data-ng-if="sim.selected">
-						<p><b>show ip bgp on {{sim.selected}}</b> <a href="" data-ng-click="simSelect('')">close</a>
+					<div data-ng-if="sim.selected" class="routing-sim-router">
+					<div data-ng-if="simRib">
+						<p><b>show ip route on {{sim.selected}}</b> <a href="" data-ng-click="simSelect('')">close</a>
+							<small class="text-muted">(&gt; selected: the lowest administrative distance; then the longest prefix match decides)</small></p>
+						<table class="table table-condensed bgp-table">
+							<tr><th></th><th>Proto</th><th>Network</th><th>AD</th><th>Next Hop</th><th>From</th><th>Why</th></tr>
+							<tbody data-ng-repeat="p in simRib.rows">
+								<tr data-ng-repeat="r in p.routes" data-ng-class="{ 'text-muted': !r.selected, warning: p.pitfall && r.selected }">
+									<td><b>{{r.selected ? '>' : ''}}</b></td><td>{{r.code}}</td><td>{{$first ? p.prefix : ''}}</td><td>{{r.ad}}</td><td>{{r.nh}}</td>
+									<td class="wrap">{{r.what}}</td><td>{{r.reason}}</td>
+								</tr>
+								<tr data-ng-if="p.pitfall" class="warning"><td></td><td colspan="6"><b>Administrative distance:</b> {{p.pitfall}}</td></tr>
+							</tbody>
+						</table>
+						<div data-ng-if="simRib.redist.length">
+							<p><b>Redistributed by {{sim.selected}}</b></p>
+							<table class="table table-condensed bgp-table">
+								<tr><th>Into</th><th>Network</th><th>Proto</th><th>Result</th></tr>
+								<tr data-ng-repeat="r in simRib.redist" data-ng-class="{ 'text-muted': !r.ok }">
+									<td>{{r.into}}</td><td>{{r.prefix}}</td><td>{{r.code}}</td><td>{{r.ok ? 'redistributed' : 'not redistributed'}}: {{r.text}}</td>
+								</tr>
+							</table>
+						</div>
+					</div>
+					<div>
+						<p><b>show ip bgp on {{sim.selected}}</b>
 							<span data-ng-if="!simTable" class="text-muted"> &middot; it does not run BGP</span></p>
 						<table class="table table-condensed bgp-table" data-ng-if="simTable">
 							<tr><th></th><th>Network</th><th>Next Hop</th><th>Metric</th><th>LocPrf</th><th>Path</th><th>From</th><th>Why</th></tr>
@@ -1179,6 +1208,7 @@
 								</tr>
 							</tbody>
 						</table>
+					</div>
 					</div>
 
 					<details>

@@ -355,7 +355,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	};
 	$scope.setPlaceholder = set => ROUTE_MAP_SETS.find(d => d.set == set).placeholder;
 
-	/* ---------- BGP Mode in the Topology tab (logic in bgp-sim.js) ---------- */
+	/* ---------- Routing Mode in the Topology tab (logic in routing-sim.js) ---------- */
 
 	// what is marked down lives only here: it is not exported with the configuration
 	$scope.SIM_NOTE = SIM_NOTE;
@@ -364,17 +364,17 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.simRun = function () {
 		let s = $scope.sim;
 		if (!s.on) {
-			$scope.simResult = $scope.simView = $scope.simTable = null;
-			bgpHighlight(null);
+			$scope.simResult = $scope.simView = $scope.simTable = $scope.simRib = null;
+			routingHighlight(null);
 			return;
 		}
-		let r = $scope.simResult = bgpSimulate($scope.netkit, $scope.labInfo.bgpAs, { down: s.down });
+		let r = $scope.simResult = routingSimulate($scope.netkit, $scope.labInfo.bgpAs, { down: s.down });
 		$scope.simRouters = r.machines.filter(M => M.router).map(M => M.name);
-		$scope.simBgpRouters = r.routers.map(M => M.name);
 		$scope.simDomains = [].concat(...r.machines.map(M => M.addrs.map(a => a.domain))).filter((d, i, a) => d && a.indexOf(d) == i).sort();
-		$scope.simView = bgpSimQuery(r, s);
+		$scope.simView = routingSimQuery(r, s);
 		$scope.simTable = s.selected && r.byName[s.selected] && r.byName[s.selected].eff ? bgpSimTable(r, s.selected) : null;
-		bgpHighlight($scope.simView.graph);
+		$scope.simRib = s.selected ? routingSimRib(r, s.selected) : null;
+		routingHighlight($scope.simView.graph);
 	};
 
 	$scope.simToggle = function () {
@@ -405,7 +405,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 
 	$scope.simSessionsDown = () => ($scope.simResult ? $scope.simResult.sessions.filter(s => !s.up).length : 0);
 
-	bgpGraphClick = function (params) {
+	routingGraphClick = function (params) {
 		let id = params.nodes[0];
 		if (!$scope.sim.on || !id || !/^machine-/.test(id)) return;
 		$scope.$apply(() => $scope.simSelect(id.slice("machine-".length)));

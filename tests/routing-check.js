@@ -1,11 +1,11 @@
-// Checks loopbacks, iBGP over loopbacks and the eBGP-only redistribution into the IGP. Run: node tests/routing-check.js
+// Checks loopbacks, iBGP over loopbacks, the eBGP-only redistribution into the IGP and Routing Mode. Run: node tests/routing-check.js
 const fs = require("fs"), vm = require("vm"), assert = require("assert"), path = require("path");
 
 const root = path.join(__dirname, "..");
 const ctx = { console, window: {}, document: { getElementById: () => ({ classList: { add() {}, remove() {} } }) } };
 vm.createContext(ctx);
 vm.runInContext("JSON.clone = o => JSON.parse(JSON.stringify(o))", ctx);
-for (const f of ["helper.js", "bgp-policy.js", "bgp-as.js", "lint.js", "models/model.js", "make.js"])
+for (const f of ["helper.js", "bgp-policy.js", "bgp-as.js", "lint.js", "models/model.js", "make.js", "routing-sim.js"])
 	vm.runInContext(fs.readFileSync(path.join(root, "src/lab-generator", f), "utf8"), ctx, { filename: f });
 
 // routers: { name: { ifs: [[domain, cidr], ...], lo, rip: [networks], ospf: [networks, area 0], connected (redistribute into the IGP),
@@ -187,6 +187,79 @@ const transit = () => lab({
 		b1(l).routing.bgp.remote.push(Object.assign({}, b1(l).routing.bgp.remote[1], { neighbor: "100.0.1.2", updateSource: "", loopback: false, nextHopSelf: false }));
 		i1.routing.rip.bgp = true;
 	}, /^warning: i1: rip redistributes bgp, but i1 has no eBGP neighbor: the eBGP-only redistribution does nothing and every BGP route \(iBGP too\) goes into the IGP/);
+}
+
+/* Routing Mode */
+const nb = (ip, as, o) => Object.assign(JSON.parse(JSON.stringify(ctx.backbone.routing.bgp.remote[0])), { neighbor: ip, as: String(as) }, o || {});
+const trace = (l, src, dst) => ctx.routingSimTrace(ctx.routingSimulate(l.netkit, l.labInfo.bgpAs), src, ctx.parseIp(dst));
+const hops = t => t.hops.map(h => h.m + " " + h.code).join(", ") + (t.delivered ? " > " + t.end : " FAIL " + t.fail);
+const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.ends.some(e => e.r.name == a) && s.ends.some(e => e.r.name == b));
+
+// iBGP over loopbacks with next-hop-self: IGP hops to the border router, then eBGP
+{
+	const l = transit(), sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
+	assert.ok(sim.sessions.every(s => s.up), sim.sessions.map(s => s.label + ": " + s.why).join("\n"));
+	const r = sim.byName.b1.best["20.1.0.0/24"];
+	assert.equal(ctx.ipToString(r.nh), "2.2.2.2", "next-hop-self: the loopback of b2");
+	assert.equal(hops(trace(l, "x1", "20.1.0.1")), "x1 B-ext, b1 R, i1 R, b2 B-ext > x2");
+	const t = trace(l, "x1", "20.1.0.1");
+	assert.equal(t.hops[1].ad, 120);
+	assert.match(t.hops[1].reason, /RIP route, metric 3 \(from b2, redistributed bgp there \(route-map eBGP seq 10\)\)/);
+	assert.ok(!t.hops.some(h => h.pitfall), "same exit: no pitfall");
+	assert.equal(hops(trace(l, "x2", "1.1.1.1")), "x2 B-ext, b2 R, i1 R > b1", "the loopbacks are announced in BGP and carried by RIP");
+	// router-id: the loopback
+	assert.equal(ctx.ipToString(ctx.simRouterId(sim.byName.b1)), "1.1.1.1");
+	// the routing table of b1: RIP (120) selected over iBGP (200)
+	const rib = ctx.routingSimRib(sim, "b1").rows.find(x => x.prefix == "20.1.0.0/24").routes.map(x => (x.selected ? ">" : " ") + x.code + " " + x.ad);
+	assert.deepEqual(rib, [">R 120", " B-int 200"]);
+}
+// the IGP does not carry a loopback: the session stays down and says why
+{
+	const l = transit();
+	machine(l, "b2").routing.rip.connected = false;
+	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs), s = session(sim, "b1", "b2");
+	assert.ok(!s.up);
+	assert.match(s.why, /has no route (back )?to 2.2.2.2.*a loopback: does the IGP carry it\?/);
+}
+
+// eBGP-only redistribution: the iBGP routes are not redistributed
+{
+	const l = transit();
+	machine(l, "b2").routing.bgp.ebgpToIgp = false;	// b2 does not put 20.1.0.0/24 into RIP: b1 uses its iBGP route
+	let sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
+	assert.equal(sim.byName.b1.fib["20.1.0.0/24"].type, "ibgp");
+	const note = ctx.routingSimRib(sim, "b1").redist.find(r => r.prefix == "20.1.0.0/24");
+	assert.ok(note && !note.ok && note.code == "B-int", "denied by the route-map");
+	assert.match(note.text, /route-map eBGP .*no entry matches/);
+	assert.ok(!sim.byName.i1.igp.rip["20.1.0.0/24"], "i1 does not learn it");
+	assert.match(hops(trace(l, "i1", "20.1.0.1")), /FAIL i1 has no route to 20.1.0.1/);
+	// the plain redistribute bgp puts the iBGP route into RIP: i1 sends it to b1, which sends it back to i1
+	Object.assign(machine(l, "b1").routing.bgp, { ebgpToIgp: false });
+	machine(l, "b1").routing.rip.bgp = true;
+	sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
+	assert.equal(sim.byName.i1.igp.rip["20.1.0.0/24"].origin, "b1");
+	assert.match(hops(trace(l, "i1", "20.1.0.1")), /^i1 R, b1 B-int FAIL forwarding loop at i1/);
+}
+
+// the administrative-distance pitfall: b1 chooses the exit b3 in BGP, but RIP (from b2) wins in its routing table
+{
+	const l = transit(), b1 = machine(l, "b1"), b2 = machine(l, "b2");
+	const l3 = lab({
+		b3: { ifs: [["P3", "60.3.0.2/24"], ["L3", "100.0.3.1/24"]], lo: "3.3.3.3", rip: ["100.0.0.0/8"], connected: true, as: 100, networks: ["100.0.0.0/8"],
+			nb: [["60.3.0.1", 20], ["1.1.1.1", 100, { updateSource: "3.3.3.3", nextHopSelf: true }], ["2.2.2.2", 100, { updateSource: "3.3.3.3", nextHopSelf: true }]] },
+		x3: { ifs: [["P3", "60.3.0.1/24"], ["N3", "20.1.0.3/24"]], as: 20, networks: ["20.1.0.0/24"], nb: [["60.3.0.2", 100]] }
+	});
+	l3.netkit[0].routing.bgp.ebgpToIgp = false;	// b3 does not redistribute into RIP
+	b1.interfaces.if.push({ eth: { number: 2, domain: "L3" }, ip: "100.0.3.2/24" });
+	b1.routing.bgp.remote.push(nb("3.3.3.3", 100, { updateSource: "1.1.1.1", nextHopSelf: true }));
+	b2.routing.bgp.remote.push(nb("3.3.3.3", 100, { updateSource: "2.2.2.2", nextHopSelf: true }));
+	l.netkit.push(...l3.netkit);
+	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs);
+	assert.equal(ctx.ipToString(sim.byName.b1.best["20.1.0.0/24"].nh), "3.3.3.3", "BGP: b3 is closer");
+	const t = ctx.routingSimTrace(sim, "x1", ctx.parseIp("20.1.0.1"));
+	assert.equal(hops(t), "x1 B-ext, b1 R, i1 R, b2 B-ext > x2");
+	assert.equal(t.hops[1].pitfall, "RIP (AD 120, from b2, redistributed bgp there (route-map eBGP seq 10)) beats iBGP (AD 200): BGP chose the exit b3 (next hop 3.3.3.3), the packets go towards b2 instead");
+	assert.equal(ctx.routingSimRib(sim, "b1").rows.find(x => x.prefix == "20.1.0.0/24").pitfall, t.hops[1].pitfall);
 }
 
 console.log("routing-check: all checks passed");
