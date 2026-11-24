@@ -164,6 +164,29 @@ assert.ok(!/prefix-list|route-map|access-list/.test(Object.values(lab.file).join
 	assert.match(ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r10/etc/zebra/ripd.conf"], /! redistribute bgp skipped/);
 }
 
+/* loopback: startup line (the course form), suggestions */
+{
+	const cfg = loadConfig("examples/example_bgp_policies.config");
+	const r1 = cfg.netkit.find(m => m.name == "r1"), r2 = cfg.netkit.find(m => m.name == "r2");
+	r1.routing.loopback = { en: true, ip: "2.2.2.2" };
+	r2.routing.loopback = { en: true, ip: "3.3.3.3/32" };
+	const files = ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file;
+	assert.match(files["r1.startup"], /dev eth\d+\nip address add 2.2.2.2\/32 dev lo:0\n/);
+	assert.ok(files["r2.startup"].includes("ip address add 3.3.3.3/32 dev lo:0\n"));
+	r1.routing.loopback.ip = "2.2.2";
+	assert.ok(!ctx.makeFilesStructure(cfg.netkit, cfg.labInfo).file["r1.startup"].includes("lo:0"), "invalid loopback not generated");
+	r1.routing.loopback.ip = "2.2.2.2";
+	let s = ctx.labSuggestions(cfg.netkit);
+	const i2 = cfg.netkit.indexOf(r2);
+	assert.ok(s.networks.some(n => n.value == "2.2.2.2/32" && n.label == "loopback of r1"));
+	assert.notEqual(r1.routing.bgp.as, r2.routing.bgp.as);
+	assert.deepEqual(s.loopbacks[i2], [], "loopbacks of other ASes are not offered for iBGP");
+	r2.routing.bgp.as = r1.routing.bgp.as;
+	s = ctx.labSuggestions(cfg.netkit);
+	assert.deepEqual(s.loopbacks[i2].map(l => l.value + " " + l.name), ["2.2.2.2 r1"]);
+	assert.ok(s.peers[i2].some(p => p.value == "2.2.2.2" && p.label == "r1 loopback (iBGP)"));
+}
+
 /* suggestions: r20 peers are the routers on its collision domains */
 const sugg = ctx.labSuggestions(loadConfig("examples/example_bgp_policies.config").netkit);
 const idx = example.netkit.findIndex(m => m.name == "r20");

@@ -52,6 +52,7 @@ var backbone = {
 		custom: ""
 	},
 	routing: {
+		loopback: { en: false, ip: "" },	// ip address add <ip>/32 dev lo:0 in the startup, see loopbackIp in bgp-policy.js
 		rip: {
 			en: false,
 			connected: false,

@@ -42,6 +42,7 @@ function simMachines(netkit, bgpAs, down, warnings) {
 			let c = parseCidr(i.ip || "");
 			if (c && i.eth.domain) M.addrs.push({ ip: c.addr, c: simNet(c), dev: "eth" + i.eth.number, domain: i.eth.domain });
 		}
+		if (loopbackIp(m)) M.addrs.push({ ip: parseIp(loopbackIp(m)), c: simNet(parseCidr(loopbackIp(m) + "/32")), dev: "lo:0", domain: "" });
 		for (let a of startupAddresses(m))
 			M.addrs.push({ ip: a.c.addr, c: simNet(a.c), dev: /^\d+$/.test(a.eth) ? "eth" + a.eth : a.eth, domain: a.domain });
 		for (let a of M.addrs) a.up = !a.domain || !down.domains[a.domain];
@@ -132,7 +133,7 @@ function simRouterConfig(M, bgpAs) {
 function simRouterId(M) {
 	if (M.rid !== undefined) return M.rid;
 	let real = M.addrs.filter(a => (a.ip >>> 24) != 127);
-	let lo = real.filter(a => a.dev == "lo");
+	let lo = real.filter(a => /^lo(:|$)/.test(a.dev));	// FRR (zebra): the highest loopback address, else the highest address
 	return Math.max(0, ...(lo.length ? lo : real).map(a => a.ip));
 }
 

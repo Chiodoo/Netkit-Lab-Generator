@@ -63,6 +63,7 @@ function migrateBgpPolicies(machine) {
 		if (remote && !remote.pref) remote.pref = defaultLinkPref();
 		if (remote && !remote.auto) remote.auto = { in: "", out: "" };
 	}
+	if (!machine.routing.loopback || typeof machine.routing.loopback != "object") machine.routing.loopback = { en: false, ip: "" };
 	for (let p in REDISTRIBUTE) {
 		let cfg = machine.routing[p];
 		if (cfg && (!cfg.rmap || typeof cfg.rmap != "object")) cfg.rmap = {};
@@ -96,6 +97,14 @@ function parseIp(s) {
 
 function ipToString(n) {
 	return [n >>> 24, n >>> 16 & 255, n >>> 8 & 255, n & 255].join(".");
+}
+
+// the loopback address of a router ("2.2.2.2", always /32), "" if it has none or it is not a valid address
+function loopbackIp(m) {
+	let lo = m && m.type == "router" && m.routing && m.routing.loopback;
+	if (!lo || !lo.en) return "";
+	let ip = String(lo.ip || "").trim().replace(/\/32$/, "");
+	return parseIp(ip) === null ? "" : ip;
 }
 
 function parseCidr(s) {
@@ -413,6 +422,9 @@ function labSuggestions(netkit) {
 		}
 	}
 	for (let m of netkit) {
+		if (loopbackIp(m)) addNetwork(loopbackIp(m) + "/32", "loopback of " + m.name);
+	}
+	for (let m of netkit) {
 		if (m.type != "router" || !m.routing) continue;
 		for (let n of m.routing.bgp.network || []) addNetwork(n, "announced by " + m.name);
 		for (let n of m.routing.rip.network || []) addNetwork(n, "rip network of " + m.name);
@@ -420,7 +432,7 @@ function labSuggestions(netkit) {
 	}
 	addNetwork("0.0.0.0/0", "default route");
 
-	let peers = [], gateways = [];
+	let peers = [], gateways = [], loopbacks = [];
 	netkit.forEach(function (m, idx) {
 		let list = [], ips = {};
 		let add = function (ip, label) {
@@ -439,17 +451,22 @@ function labSuggestions(netkit) {
 			});
 		}
 		gateways.push(list.slice());
-		let bgp = m.type == "router" && m.routing && m.routing.bgp;
+		let bgp = m.type == "router" && m.routing && m.routing.bgp, mine = [];
 		if (bgp && bgp.en && bgp.as) {
 			netkit.forEach(function (o, j) {
 				if (j == idx || o.type != "router" || !o.routing || !o.routing.bgp.en || o.routing.bgp.as != bgp.as) return;
+				if (loopbackIp(o)) {
+					add(loopbackIp(o), o.name + " loopback (iBGP)");
+					mine.push({ value: loopbackIp(o), label: o.name + " loopback (iBGP)", name: o.name });
+				}
 				for (let i of ifaces(o)) {
 					if (i.ip) add(i.ip.split("/")[0], o.name + " eth" + i.eth.number + " (iBGP)");
 				}
 			});
 		}
 		peers.push(list);
+		loopbacks.push(mine);	// loopbacks of the other routers of the same AS
 	});
 
-	return { networks: networks, peers: peers, gateways: gateways };
+	return { networks: networks, peers: peers, gateways: gateways, loopbacks: loopbacks };
 }

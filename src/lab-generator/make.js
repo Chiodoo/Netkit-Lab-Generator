@@ -410,6 +410,9 @@ function makeStaticRouting(netkit, lab){
 					lab.file[machine.name + ".startup"] += "ip address add "+interface.ip+" dev eth" + interface.eth.number+"\n";
 				}
 			}
+			// same form as the course labs: iproute2 puts the address on lo (no lo:0 alias is created)
+			if (loopbackIp(machine))
+				lab.file[machine.name + ".startup"] += "ip address add " + loopbackIp(machine) + "/32 dev lo:0\n";
 
 			for (let gateway of machine.gateways.gw) {
 				if (gateway.gw && gateway.gw != "") {

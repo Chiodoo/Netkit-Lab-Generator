@@ -33,6 +33,11 @@ expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.3.1/24", /^error: colli
 expect(n => machine(n, "r1").interfaces.if[1].eth.domain = "", /^error: r1 eth1: no collision domain/);
 expect(n => machine(n, "r1").interfaces.if[1].eth.domain = "g", /^warning: collision domains G and g differ only in case/);
 
+/* loopback */
+expect(n => machine(n, "r1").routing.loopback = { en: true, ip: "300.1.1.1" }, /^error: r1: loopback '300.1.1.1' is not an address/);
+expect(n => machine(n, "r1").routing.loopback = { en: true, ip: "50.1.2.2" }, /^error: address 50.1.2.2 is used more than once: r1 lo:0, r2 eth0|^error: address 50.1.2.2 is used more than once: r2 eth0, r1 lo:0/);
+expect(n => { machine(n, "r1").routing.loopback = { en: true, ip: "9.9.9.9" }; machine(n, "r2").routing.loopback = { en: true, ip: "9.9.9.9" }; }, /^error: address 9.9.9.9 is used more than once: r1 lo:0, r2 lo:0/);
+
 /* BGP neighbors */
 expect(n => machine(n, "r1").routing.bgp.remote[1].neighbor = "50.1.2.3", /^error: r1 neighbor 50.1.2.3: no machine has this address/);
 expect(n => machine(n, "r1").routing.bgp.remote[1].as = "3", /^error: r1 neighbor 50.1.2.2 is r2 eth0 in AS 2, not AS 3/);

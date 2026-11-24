@@ -112,6 +112,7 @@ function generate_nodes_edges(lab, bgpAs) {
 			nodes.push({
 				id: id,
 				label: (machine.type == "other") ? machine.name + " (" + machine.other.image + ")" : machine.name,
+				title: loopbackIp(machine) ? "loopback " + loopbackIp(machine) + "/32" : undefined,
 				group: machine.type
 			});
 		}

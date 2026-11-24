@@ -323,6 +323,7 @@ app.controller("nc", function ($location, $anchorScroll, $scope, $timeout) {
 	$scope.matchListType = match => matchDef({ match: match }).type;
 	$scope.matchPlaceholder = match => matchDef({ match: match }).placeholder;
 	// the policies row of a router: route-maps are used by BGP neighbors and by redistribute statements
+	$scope.graphChanged = () => changed = true;
 	$scope.hasPolicies = m => m.type == "router" && (m.routing.bgp.en || m.routing.rip.en || m.routing.ospf.en);
 	// unticking a redistribute statement also drops its route-map, so it no longer blocks deleting the route-map
 	$scope.redistToggle = function (cfg, src) {

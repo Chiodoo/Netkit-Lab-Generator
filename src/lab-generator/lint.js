@@ -60,6 +60,7 @@ function lintLab(netkit, bgpAs) {
 	netkit.forEach(function (m, idx) {
 		if (!hasIps(m)) return;
 		let list = ifaces(m).map(i => ({ c: parseCidr(i.ip || ""), eth: i.eth.number, domain: i.eth.domain })).concat(startupAddresses(m));
+		if (loopbackIp(m)) list.push({ c: parseCidr(loopbackIp(m) + "/32"), eth: "lo:0", domain: "" });
 		for (let a of list) {
 			if (!a.c) continue;
 			let ip = ipToString(a.c.addr);
@@ -192,6 +193,8 @@ function lintLab(netkit, bgpAs) {
 	function lintRouter(m, idx) {
 		let n = name(m), r = m.routing;
 		let on = { rip: r.rip.en, ospf: r.ospf.en, bgp: r.bgp.en };
+		if (r.loopback && r.loopback.en && !loopbackIp(m))
+			add("error", idx, n + ": loopback '" + (r.loopback.ip || "") + "' is not an address like 2.2.2.2 (always /32), it is not generated");
 		for (let p of ["rip", "ospf"]) {
 			if (!on[p]) continue;
 			if (!r[p].network.some(x => x)) add("warning", idx, n + ": " + p + " is enabled but has no network");

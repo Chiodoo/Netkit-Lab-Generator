@@ -450,7 +450,14 @@
 										<option value="frr">FRR</option>
 										<option value="quagga">Quagga</option>
 									</select>
-									<br><br>
+									<p>
+										<label class="plain"><input type="checkbox" title="loopback"
+											data-ng-model="machine.routing.loopback.en" data-ng-change="graphChanged()" /> Insert loopback</label>
+										<input type="text" class="form-control" placeholder="2.2.2.2" title="always /32: ip address add &lt;ip&gt;/32 dev lo:0"
+											data-ng-show="machine.routing.loopback.en" data-ng-change="graphChanged()" data-ng-model-options="{allowInvalid: true}"
+											pattern="((^|\.)((25[0-5])|(2[0-4]\d)|(1\d\d)|([1-9]?\d))){4}(/32)?$"
+											data-ng-model="machine.routing.loopback.ip" />
+									</p>
 									<span>Routing protocols:</span>
 									<p>
 										<input title="en" type="checkbox" value="router"
@@ -482,7 +489,7 @@
 												data-ng-model="machine.routing.rip.route[$index]" />
 										</div>
 										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.rip">
-											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+											<label class="plain"><input type="checkbox" title="redistribute {{src}}"
 												data-ng-model="machine.routing.rip[src]"
 												data-ng-change="redistToggle(machine.routing.rip, src)" /> redistribute {{src}}</label>
 											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
@@ -528,7 +535,7 @@
 												data-ng-model="machine.routing.ospf.stub[$index]" /> stub?
 										</div>
 										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.ospf">
-											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+											<label class="plain"><input type="checkbox" title="redistribute {{src}}"
 												data-ng-model="machine.routing.ospf[src]"
 												data-ng-change="redistToggle(machine.routing.ospf, src)" /> redistribute {{src}}</label>
 											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
@@ -592,7 +599,7 @@
 												data-ng-model="machine.routing.bgp.network[$index]" />
 										</div>
 										<div class="form-inline" data-ng-repeat="src in REDISTRIBUTE.bgp">
-											<label class="redistribute"><input type="checkbox" title="redistribute {{src}}"
+											<label class="plain"><input type="checkbox" title="redistribute {{src}}"
 												data-ng-model="machine.routing.bgp[src]"
 												data-ng-change="redistToggle(machine.routing.bgp, src)" /> redistribute {{src}}</label>
 											<select class="form-control input-sm" title="route-map of redistribute {{src}}"
