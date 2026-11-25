@@ -344,6 +344,8 @@ button {
 	position: sticky;
 	left: 0;
 	background: #fff;
+	color: #333;	/* the global th is white on blue */
+	font-weight: bold;
 }
 
 .routing-sim-reach tr:first-child th span {

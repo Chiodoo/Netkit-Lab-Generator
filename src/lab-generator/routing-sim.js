@@ -789,7 +789,8 @@ function routingSimTrace(sim, srcName, dst) {
 			res.fail = cur.name + ": next hop " + ipToString(e.nh) + " of " + hop.prefix + " unreachable";
 			return res;
 		}
-		let next = sim.owner[via.ip];
+		// the machine with that address in that collision domain: an address may be on more machines (anycast)
+		let next = sim.machines.find(O => O.addrs.some(a => a.ip == via.ip && a.up && a.domain == via.domain));
 		hop.nh = e.type == "connected" ? "" : ipToString(e.nh);
 		hop.via = ipToString(via.ip);
 		hop.domain = via.domain;
@@ -800,7 +801,7 @@ function routingSimTrace(sim, srcName, dst) {
 			hop.lp = e.route.lp;
 			hop.med = e.route.med === undefined ? "" : e.route.med;
 		}
-		if (!next || !next.addrs.some(a => a.ip == via.ip && a.up && a.domain == via.domain)) {
+		if (!next) {
 			res.fail = e.type == "connected" ? "no machine has " + ipToString(dst) + " in " + hop.prefix + " (collision domain " + via.domain + ")"
 				: "no machine has the next hop " + hop.via;
 			return res;
@@ -981,14 +982,18 @@ function routingSimReachability(sim) {
 	for (let O of sim.machines) for (let a of O.addrs) cols.push({ m: O.name, dev: a.dev, ip: a.ip, label: ipToString(a.ip), first: a === O.addrs[0] });
 	let rows = sim.machines.map(M => ({ m: M.name, cells: cols.map(function (col) {
 		let to = M.name + " \u2192 " + col.m + " " + col.dev + " " + col.label;
-		if (col.m == M.name) return { status: "self", text: to + ": own address" };
+		let others = sim.machines.filter(O => O.name != col.m && O.addrs.some(a => a.ip == col.ip)).map(O => O.name);
+		let any = others.length ? " (anycast: " + col.label + " is also on " + others.join(", ") + ")" : "";
+		if (col.m == M.name || M.addrs.some(a => a.ip == col.ip)) return { status: "self", text: to + ": own address" + any };
 		let t = routingSimTrace(sim, M.name, col.ip), cell;
-		if (!t.delivered) cell = { status: "fail", text: to + ": " + t.fail };
+		if (!t.delivered) cell = { status: "fail", text: to + ": " + t.fail + any };
 		else {
 			let out = t.hops.length && M.addrs.find(a => a.domain == t.hops[0].domain && a.up);
 			let back = out ? routingSimTrace(sim, t.end, out.ip) : { fail: "no source address" };
-			cell = back.delivered ? { status: "ok", text: to + ": reply received" }
-				: { status: "oneway", text: to + ": delivered to " + t.end + ", the reply to " + (out ? ipToString(out.ip) : "?") + " is lost: " + back.fail };
+			let got = (t.end != col.m ? "delivered to " + t.end + any : "delivered") + ", the reply to " + (out ? ipToString(out.ip) : "?");
+			cell = back.delivered && back.end == M.name ? { status: "ok", text: to + ": " + got + " received" }
+				: back.delivered ? { status: "oneway", text: to + ": " + got + " goes to " + back.end + " instead (anycast: " + back.end + " has it too)" }
+				: { status: "oneway", text: to + ": " + got + " is lost: " + back.fail };
 		}
 		count[cell.status]++;
 		return cell;

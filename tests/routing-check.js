@@ -224,7 +224,7 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	// reachability: b2's subnets are not in RIP, x2 reaches AS 100 but the replies to 60.2.0.1 are lost
 	assert.deepEqual([reach.count, reach.total], [{ ok: 31, oneway: 3, fail: 14 }, 48]);
 	const cell = (from, ip) => reach.rows.find(r => r.m == from).cells[reach.cols.findIndex(c => c.label == ip)];
-	assert.equal(cell("x2", "100.0.1.2").text, "x2 \u2192 i1 eth0 100.0.1.2: delivered to i1, the reply to 60.2.0.1 is lost: i1 has no route to 60.2.0.1");
+	assert.equal(cell("x2", "100.0.1.2").text, "x2 \u2192 i1 eth0 100.0.1.2: delivered, the reply to 60.2.0.1 is lost: i1 has no route to 60.2.0.1");
 	assert.equal(cell("b1", "2.2.2.2").status, "fail");
 	assert.equal(cell("b2", "2.2.2.2").status, "self");
 }
@@ -292,6 +292,34 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	l.netkit.forEach(m => m.routingSoftware = "quagga");
 	const q = files(l)["b1/etc/zebra/ospfd.conf"];
 	assert.ok(q.includes("\tredistribute connected route-map connected-e1\n") && q.includes("route-map eBGP permit 10\n") && q.includes("interface eth2\n\tospf cost 50\n"));
+}
+
+// anycast: h1 and h2 both have 20.0.0.2 (as in the Nefertiti exam lab); a ping is delivered to the nearest one and
+// so is the reply, which may not be the machine that sent the request
+{
+	const l = lab({
+		r1: { ifs: [["A", "20.0.0.1/24"], ["B", "30.0.0.1/24"]], rip: ["20.0.0.0/8", "30.0.0.0/8"] },
+		r2: { ifs: [["B", "30.0.0.2/24"], ["C", "40.0.0.1/24"]], rip: ["30.0.0.0/8", "40.0.0.0/8"] },
+		r4: { ifs: [["C", "40.0.0.2/24"], ["D", "50.0.0.1/24"]], rip: ["40.0.0.0/8", "50.0.0.0/8"] },
+		r3: { ifs: [["D", "50.0.0.2/24"], ["H", "20.0.0.3/24"]], rip: ["50.0.0.0/8", "20.0.0.0/8"] }
+	});
+	for (const [name, domain, gw] of [["h1", "A", "20.0.0.1"], ["h2", "H", "20.0.0.3"]]) {
+		const m = JSON.parse(JSON.stringify(ctx.backbone));
+		Object.assign(m, { name: name, row: l.netkit.length + 1 });
+		m.interfaces.if = [{ eth: { number: 0, domain: domain }, ip: "20.0.0.2/24" }];
+		m.gateways.gw = [{ route: "", gw: gw, if: 0 }];
+		l.netkit.push(m);
+	}
+	const sim = ctx.routingSimulate(l.netkit, l.labInfo.bgpAs), reach = ctx.routingSimReachability(sim);
+	const cell = (from, m, ip) => reach.rows.find(r => r.m == from).cells[reach.cols.findIndex(c => c.m == m && c.label == ip)];
+	assert.equal(hops(ctx.routingSimTrace(sim, "r4", ctx.parseIp("20.0.0.2"))), "r4 R, r3 C > h2");
+	assert.equal(cell("r2", "h2", "20.0.0.2").status, "ok");
+	assert.match(cell("r2", "h2", "20.0.0.2").text, /delivered to h1 \(anycast: 20.0.0.2 is also on h1\)/);
+	assert.equal(cell("h1", "r4", "40.0.0.2").status, "oneway");
+	assert.match(cell("h1", "r4", "40.0.0.2").text, /the reply to 20.0.0.2 goes to h2 instead/);
+	assert.equal(cell("h1", "r2", "40.0.0.1").status, "ok");
+	assert.equal(cell("h1", "h2", "20.0.0.2").status, "self");
+	assert.equal(cell("h1", "r3", "20.0.0.3").status, "fail", "20.0.0.3 is on H, not on the LAN of h1");
 }
 
 console.log("routing-check: all checks passed");
