@@ -70,9 +70,19 @@ function lintLab(netkit, bgpAs) {
 	let ownerOf = ip => (owners[ip] || [])[0];
 	let addressesOf = idx => Object.keys(owners).map(ip => Object.assign({ ip: ip }, owners[ip].find(o => o.idx == idx))).filter(o => o.idx !== undefined);
 	let where = o => name(netkit[o.idx]) + " " + ifName(o);
+	// the same address in different collision domains may be anycast: a warning, with the subnet shared by those
+	// domains on the same line instead of the "subnet used in two collision domains" warning
+	let anycast = [];
 	for (let ip in owners) {
-		if (owners[ip].length > 1)
-			add("error", owners[ip][1].idx, "address " + ip + " is used more than once: " + owners[ip].map(where).join(", "));
+		let list = owners[ip], doms = list.map(o => o.domain);
+		if (list.length < 2) continue;
+		if (doms.every((d, i) => d && doms.indexOf(d) == i)) {
+			let c = list[0].c, subnet = ipToString(c.net) + "/" + c.len;
+			anycast.push({ ip: parseIp(ip), doms: doms });
+			add("warning", list[1].idx, "address " + ip + " is used more than once: " + list.map(where).join(", ")
+				+ " (intentional if it is anycast: then " + subnet + " in collision domains " + doms.join(" and ") + " is fine too)");
+		}
+		else add("error", list[1].idx, "address " + ip + " is used more than once: " + list.map(where).join(", "));
 	}
 
 	/* -------- collision domains -------- */
@@ -95,7 +105,8 @@ function lintLab(netkit, bgpAs) {
 		// switches bridge their collision domains: one subnet across them is normal
 		let bridged = members.some(o => netkit[o.idx].type == "switch");
 		for (let k of bridged ? [] : keys) {
-			if (subnetDomain[k] && subnetDomain[k] != d)
+			let c = parseCidr(k);
+			if (subnetDomain[k] && subnetDomain[k] != d && !anycast.some(a => inSubnet(a.ip, c) && a.doms.indexOf(d) >= 0 && a.doms.indexOf(subnetDomain[k]) >= 0))
 				add("warning", subnets[k][0].idx, "subnet " + k + " is used in collision domains " + subnetDomain[k] + " and " + d + ": is one of them misspelled?");
 			subnetDomain[k] = d;
 		}

@@ -29,6 +29,12 @@ expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.2.0/24", /^error: r1 et
 expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.2.255/24", /^error: r1 eth1: .* broadcast/);
 expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.2.1", /^error: r1 eth1: '50.1.2.1' is not an address/);
 expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.2.2/24", /^error: address 50.1.2.2 is used more than once: r1 eth1, r2 eth0/);
+{	// the same address in two collision domains: anycast, one warning that also covers the shared subnet
+	const n = load();
+	Object.assign(machine(n, "r1").interfaces.if[1], { ip: "50.1.2.2/24" });
+	machine(n, "r1").interfaces.if[1].eth.domain = "Z";
+	assert.deepEqual(lint(n).filter(t => /used more than once|subnet 50/.test(t)), ["warning: address 50.1.2.2 is used more than once: r1 eth1, r2 eth0 (intentional if it is anycast: then 50.1.2.0/24 in collision domains Z and G is fine too)"]);
+}
 expect(n => machine(n, "r1").interfaces.if[1].ip = "50.1.3.1/24", /^error: collision domain G mixes different subnets/);
 expect(n => machine(n, "r1").interfaces.if[1].eth.domain = "", /^error: r1 eth1: no collision domain/);
 expect(n => machine(n, "r1").interfaces.if[1].eth.domain = "g", /^warning: collision domains G and g differ only in case/);
