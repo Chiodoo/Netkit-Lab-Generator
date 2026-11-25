@@ -802,7 +802,9 @@ function routingSimTrace(sim, srcName, dst) {
 			hop.med = e.route.med === undefined ? "" : e.route.med;
 		}
 		if (!next) {
+			let elsewhere = sim.machines.filter(O => O.addrs.some(a => a.ip == dst && a.domain != via.domain)).map(O => O.name + " in collision domain " + O.addrs.find(a => a.ip == dst).domain);
 			res.fail = e.type == "connected" ? "no machine has " + ipToString(dst) + " in " + hop.prefix + " (collision domain " + via.domain + ")"
+				+ (elsewhere.length ? ": " + cur.name + " sends an ARP request there that gets no answer, " + ipToString(dst) + " is on " + elsewhere.join(", ") : "")
 				: "no machine has the next hop " + hop.via;
 			return res;
 		}

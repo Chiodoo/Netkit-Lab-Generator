@@ -320,6 +320,8 @@ const session = (sim, a, b) => sim.sessions.find(s => s.ends.length == 2 && s.en
 	assert.equal(cell("h1", "r2", "40.0.0.1").status, "ok");
 	assert.equal(cell("h1", "h2", "20.0.0.2").status, "self");
 	assert.equal(cell("h1", "r3", "20.0.0.3").status, "fail", "20.0.0.3 is on H, not on the LAN of h1");
+	// checked on the running Nefertiti lab: ws2 ping 20.0.0.1 leaves the neighbor INCOMPLETE, r1 sees no packet
+	assert.match(cell("h1", "r3", "20.0.0.3").text, /h1 sends an ARP request there that gets no answer, 20.0.0.3 is on r3 in collision domain H$/);
 }
 
 console.log("routing-check: all checks passed");
